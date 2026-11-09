@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import Haftnotiz
@@ -289,5 +290,72 @@ struct FolderWatchTests {
             try await Task.sleep(for: .milliseconds(100))
         }
         #expect(store.note("Obsidian.md")?.body == "zwei")
+    }
+}
+
+@MainActor
+@Suite("Editor keys")
+struct EditorKeyTests {
+    private func makeView(_ text: String) -> MarkdownTextView {
+        let view = MarkdownTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
+        view.string = text
+        view.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+        return view
+    }
+
+    @Test("Return continues a checklist, Return on the empty item ends it")
+    func returnInList() {
+        let view = makeView("- [ ] Milch")
+        view.insertNewline(nil)
+        #expect(view.string == "- [ ] Milch\n- [ ] ")
+        view.insertNewline(nil)
+        #expect(view.string == "- [ ] Milch\n")
+    }
+
+    @Test("Return on an empty item ends the list even with the caret before the trailing space")
+    func returnBeforeSpace() {
+        let view = makeView("- [x] Milch\n- [ ] ")
+        view.setSelectedRange(NSRange(location: 17, length: 0))   // between "]" and " "
+        view.insertNewline(nil)
+        #expect(view.string == "- [x] Milch\n")
+    }
+
+    @Test("a lone dash is not an empty item: Return keeps it")
+    func loneDash() {
+        let view = makeView("-")
+        view.insertNewline(nil)
+        #expect(view.string == "-\n")
+    }
+
+    @Test("the same through real key events")
+    func returnKeyEvents() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        let view = makeView("- [ ] Milch")
+        window.contentView = view
+        window.makeFirstResponder(view)
+        func pressReturn() throws {
+            let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                                      windowNumber: window.windowNumber, context: nil, characters: "\r",
+                                                      charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36))
+            view.keyDown(with: event)
+        }
+        try pressReturn()
+        #expect(view.string == "- [ ] Milch\n- [ ] ")
+        try pressReturn()
+        #expect(view.string == "- [ ] Milch\n")
+    }
+}
+
+@Suite("Hanging indent")
+struct HangingIndentTests {
+    @Test("wrapped list lines start where the item's text starts")
+    func indents() throws {
+        let box = try #require(MarkdownStyler.hangingIndent(for: "- [ ] Milch"))
+        let bullet = try #require(MarkdownStyler.hangingIndent(for: "- Milch"))
+        let nested = try #require(MarkdownStyler.hangingIndent(for: "    - [ ] Milch"))
+        #expect(box > MarkdownStyler.checkboxWidth)
+        #expect(bullet > 0 && bullet < box)
+        #expect(nested > box)
+        #expect(MarkdownStyler.hangingIndent(for: "Text") == nil)
     }
 }

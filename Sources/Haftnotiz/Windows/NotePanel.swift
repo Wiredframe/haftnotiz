@@ -26,12 +26,15 @@ final class NotePanel: NSPanel {
         appearance = NSAppearance(named: .aqua)   // light paper: menus, popovers and scrollers to match
         isReleasedWhenClosed = false
         animationBehavior = .utilityWindow
-        minSize = NSSize(width: 180, height: 120)
+        minSize = NSSize(width: 200, height: 200)
         standardWindowButton(.closeButton)?.isHidden = true
         standardWindowButton(.miniaturizeButton)?.isHidden = true
         standardWindowButton(.zoomButton)?.isHidden = true
 
         let hosting = NSHostingView(rootView: content)
+        // The window manager owns the size (square notes, roll-up); SwiftUI must not impose a minimum,
+        // or a rolled-up note stays as tall as the editor was a moment before.
+        hosting.sizingOptions = []
         hosting.autoresizingMask = [.width, .height]
         contentView = hosting
         apply(pinned: window.pinned, showOnAllSpaces: window.showOnAllSpaces)

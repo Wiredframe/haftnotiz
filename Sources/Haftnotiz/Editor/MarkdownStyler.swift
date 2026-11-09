@@ -33,8 +33,14 @@ struct MarkdownStyler {
         let ns = storage.string as NSString
         let paragraphs = ns.paragraphRange(for: range)
         storage.setAttributes(baseAttributes, range: paragraphs)
-        ns.enumerateSubstrings(in: paragraphs, options: [.byLines, .substringNotRequired]) { _, lineRange, _, _ in
+        ns.enumerateSubstrings(in: paragraphs, options: [.byLines, .substringNotRequired]) { _, lineRange, enclosing, _ in
             let line = ns.substring(with: lineRange)
+            // List items hang: wrapped lines line up with the item's text, not with its marker.
+            if let indent = Self.hangingIndent(for: line) {
+                let style = (Self.paragraphStyle.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+                style.headIndent = indent
+                storage.addAttribute(.paragraphStyle, value: style, range: enclosing)
+            }
             let spans = MarkdownSyntax.spans(in: line).map {
                 MarkdownSyntax.Span(range: NSRange(location: $0.range.location + lineRange.location, length: $0.range.length),
                                     kind: $0.kind)
@@ -54,6 +60,20 @@ struct MarkdownStyler {
             apply(to: storage, in: NSRange(location: 0, length: storage.length))
         }
         storage.endEditing()
+    }
+
+    /// How wide the drawn checkbox (circle plus a little air) is; the hidden `- [ ]` is kerned to this.
+    static let checkboxWidth: CGFloat = 19
+
+    private static func width(_ text: String) -> CGFloat {
+        (text as NSString).size(withAttributes: [.font: bodyFont]).width
+    }
+
+    /// Where the text of a list item starts, for the wrapped lines; nil for anything else.
+    static func hangingIndent(for line: String) -> CGFloat? {
+        guard let item = ListEditing.parse(line) else { return nil }
+        let indent = width(item.indent)
+        return item.isCheckbox ? indent + checkboxWidth + width(" ") : indent + width(item.marker)
     }
 
     private static func order(_ kind: MarkdownSyntax.Kind) -> Int {
@@ -79,7 +99,10 @@ struct MarkdownStyler {
         case .bullet:
             storage.addAttribute(.foregroundColor, value: accent, range: r)
         case let .checkbox(done):
-            storage.addAttributes([.foregroundColor: NSColor.clear, .haftCheckbox: done], range: r)
+            // The five hidden characters `- [ ]` are kerned together to exactly the circle's width.
+            let natural = Self.width((storage.string as NSString).substring(with: r))
+            let kern = (Self.checkboxWidth - natural) / CGFloat(r.length)
+            storage.addAttributes([.foregroundColor: NSColor.clear, .haftCheckbox: done, .kern: kern], range: r)
         case .done:
             storage.addAttributes([.foregroundColor: secondary, .strikethroughStyle: NSUnderlineStyle.single.rawValue,
                                    .strikethroughColor: secondary.withAlphaComponent(0.6)], range: r)
@@ -125,7 +148,7 @@ final class CheckboxLayoutManager: NSLayoutManager {
             let line = lineFragmentUsedRect(forGlyphAt: glyphs.location, effectiveRange: nil)
             let box = boundingRect(forGlyphRange: glyphs, in: container)
             let size: CGFloat = 15
-            let rect = NSRect(x: origin.x + box.minX + 1, y: origin.y + line.midY - size / 2, width: size, height: size)
+            let rect = NSRect(x: origin.x + box.minX, y: origin.y + line.midY - size / 2, width: size, height: size)
             Self.symbol(done: done, color: done ? doneColor : openColor, size: size)?
                 .draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         }

@@ -16,11 +16,11 @@ struct NoteActions {
 @MainActor
 final class NoteWindowManager: NSObject, NSWindowDelegate {
     static let collapsedHeight: CGFloat = 38
+    static let defaultSide: CGFloat = 400
+    static let minSide: CGFloat = 200
 
     private let store: NoteStore
     private var panels: [String: NotePanel] = [:]
-    /// Height a note had before it was rolled up.
-    private var expandedHeights: [String: CGFloat] = [:]
     /// The frame the user last chose for each open note. Only user drags and resizes change it, so a
     /// note parked because its display went away returns to its spot when the display comes back.
     private var savedFrames: [String: CGRect] = [:]
@@ -66,10 +66,15 @@ final class NoteWindowManager: NSObject, NSWindowDelegate {
             return existing
         }
         guard let note = store.note(id) else { return nil }
-        let frame = note.window.frame ?? defaultFrame(offset: panels.count)
+        // Notes are square: an older or hand-edited frame becomes square, keeping its top-left corner.
+        var frame = note.window.frame ?? defaultFrame(offset: panels.count)
+        if frame.width != frame.height {
+            let side = max(frame.width, Self.minSide)
+            frame = CGRect(x: frame.minX, y: frame.maxY - side, width: side, height: side)
+        }
         store.updateWindow(id) {
             $0.isOpen = true
-            if $0.frame == nil { $0.frame = frame }
+            $0.frame = frame
         }
         let actions = NoteActions(
             close: { [weak self] in self?.close(id) },
@@ -86,7 +91,11 @@ final class NoteWindowManager: NSObject, NSWindowDelegate {
         savedFrames[id] = frame
         place(panel)
         if makeKey { panel.makeKeyAndOrderFront(nil) } else { panel.orderFront(nil) }
-        if note.window.isCollapsed { setCollapsed(panel, collapsed: true, animate: false) }
+        if note.window.isCollapsed {
+            setCollapsed(panel, collapsed: true, animate: false)
+        } else {
+            lockSquare(panel)
+        }
         panel.delegate = self   // only now: the placement above is not a user move
         return panel
     }
@@ -107,7 +116,7 @@ final class NoteWindowManager: NSObject, NSWindowDelegate {
     private func defaultFrame(offset: Int, screen: CGRect? = nil) -> CGRect {
         let area = screen ?? (NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900))
         let step = CGFloat(offset % 8) * 26
-        let size = CGSize(width: 280, height: 280)
+        let size = CGSize(width: Self.defaultSide, height: Self.defaultSide)
         return CGRect(x: area.minX + 140 + step, y: area.maxY - 100 - size.height - step,
                       width: size.width, height: size.height)
     }
@@ -132,7 +141,11 @@ final class NoteWindowManager: NSObject, NSWindowDelegate {
         guard let note = store.note(id) else { return }
         let collapsed = !note.window.isCollapsed
         store.updateWindow(id) { $0.isCollapsed = collapsed }
-        if let panel = panels[id] { setCollapsed(panel, collapsed: collapsed, animate: true) }
+        // Resize once SwiftUI has swapped the content (editor out or back in).
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let panel = self.panels[id] else { return }
+            self.setCollapsed(panel, collapsed: collapsed, animate: true)
+        }
     }
 
     private func togglePinned(_ id: String) {
@@ -158,18 +171,27 @@ final class NoteWindowManager: NSObject, NSWindowDelegate {
         let current = panel.frame
         let target: CGFloat
         if collapsed {
-            if current.height > Self.collapsedHeight { expandedHeights[id] = current.height }
             target = Self.collapsedHeight
-            panel.minSize = NSSize(width: panel.minSize.width, height: target)
+            // Rolled up, the note can't be resized at all.
+            panel.resizeIncrements = NSSize(width: 1, height: 1)
+            panel.styleMask.remove(.resizable)
+            panel.minSize = NSSize(width: Self.minSide, height: target)
             panel.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: target)
         } else {
-            target = expandedHeights[id] ?? savedFrames[id]?.height ?? max(current.height, 240)
-            expandedHeights[id] = nil
-            panel.minSize = NSSize(width: panel.minSize.width, height: 120)
+            target = current.width
+            panel.styleMask.insert(.resizable)
+            panel.minSize = NSSize(width: Self.minSide, height: Self.minSide)
             panel.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         }
         let frame = NSRect(x: current.minX, y: current.maxY - target, width: current.width, height: target)
         panel.setFrame(frame, display: true, animate: animate)
+        if !collapsed { lockSquare(panel) }
+    }
+
+    /// The user can only resize a note as a square.
+    private func lockSquare(_ panel: NotePanel) {
+        panel.minSize = NSSize(width: Self.minSide, height: Self.minSide)
+        panel.aspectRatio = NSSize(width: 1, height: 1)
     }
 
     /// Puts a panel at its saved frame when a display shows it, else parks it on the main display.
@@ -210,7 +232,6 @@ final class NoteWindowManager: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         guard let panel = notification.object as? NotePanel else { return }
-        expandedHeights[panel.noteID] = nil
         savedFrames[panel.noteID] = nil
         panels[panel.noteID] = nil
     }
@@ -219,9 +240,9 @@ final class NoteWindowManager: NSObject, NSWindowDelegate {
         guard let panel = notification.object as? NotePanel, !placing, Date() >= suppressSavesUntil else { return }
         let id = panel.noteID
         let live = panel.frame
-        // Rolled up: keep the expanded height, and the top edge where it is.
+        // Rolled up: the note is still a square of its width, hanging from the same top edge.
         let collapsed = store.note(id)?.window.isCollapsed == true
-        let height = collapsed ? (expandedHeights[id] ?? live.height) : live.height
+        let height = collapsed ? live.width : live.height
         let frame = CGRect(x: live.minX, y: live.maxY - height, width: live.width, height: height)
         savedFrames[id] = frame
         store.updateWindow(id) { $0.frame = frame }

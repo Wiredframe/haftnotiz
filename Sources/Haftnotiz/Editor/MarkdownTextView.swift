@@ -80,8 +80,18 @@ final class MarkdownTextView: NSTextView {
 
     override func insertNewline(_ sender: Any?) {
         let selection = selectedRange()
-        let lineStart = currentLineRange.location
-        let beforeCaret = (string as NSString).substring(with: NSRange(location: lineStart, length: selection.location - lineStart))
+        let lineRange = currentLineRange
+        let lineStart = lineRange.location
+        let ns = string as NSString
+        // An empty item ends the list wherever the caret sits in it (e.g. before the trailing space).
+        let wholeLine = ns.substring(with: lineRange).trimmingCharacters(in: .newlines)
+        if selection.length == 0, let item = ListEditing.parse(wholeLine.hasSuffix("]") ? wholeLine + " " : wholeLine),
+           item.body.trimmingCharacters(in: .whitespaces).isEmpty {
+            let length = (wholeLine as NSString).length
+            replace(NSRange(location: lineStart, length: length), with: "", selecting: NSRange(location: lineStart, length: 0))
+            return
+        }
+        let beforeCaret = ns.substring(with: NSRange(location: lineStart, length: selection.location - lineStart))
         switch ListEditing.returnAction(after: beforeCaret) {
         case .plain:
             super.insertNewline(sender)
