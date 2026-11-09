@@ -12,6 +12,9 @@ struct NoteView: View {
     @State private var hovering = false
     @State private var showColors = false
 
+    /// The header controls show while the pointer is on the note, or the colour picker is open.
+    private var controlsVisible: Bool { hovering || showColors }
+
     var body: some View {
         if let note = store.note(id) {
             let theme = NoteTheme(color: note.color)
@@ -49,7 +52,11 @@ struct NoteView: View {
                     .lineLimit(1)
                     .allowsHitTesting(false)
             }
-            if hovering || note.window.isCollapsed { leftControls(note, theme).opacity(hovering ? 1 : 0) }
+            // Always in the layout, only faded: removing the colour button would close its popover the
+            // moment the pointer moves from the note into it.
+            leftControls(note, theme)
+                .opacity(controlsVisible ? 1 : 0)
+                .allowsHitTesting(controlsVisible)
             Spacer(minLength: 0)
             rightControls(note, theme)
         }
@@ -82,18 +89,18 @@ struct NoteView: View {
 
     private func rightControls(_ note: Note, _ theme: NoteTheme) -> some View {
         HStack(spacing: 2) {
-            if hovering {
+            if controlsVisible {
                 iconButton(note.window.isCollapsed ? "chevron.down" : "chevron.up", theme,
                            help: note.window.isCollapsed ? "Aufklappen" : "Zuklappen", action: actions.toggleCollapsed)
                 moreMenu(note, theme)
             }
             // The pin stays visible on a pinned note, so you can tell which ones float.
-            if hovering || note.window.pinned {
+            if controlsVisible || note.window.pinned {
                 iconButton(note.window.pinned ? "pin.fill" : "pin", theme, active: note.window.pinned,
                            help: note.window.pinned ? "Nicht mehr im Vordergrund halten" : "Im Vordergrund halten",
                            action: actions.togglePinned)
             }
-            if hovering {
+            if controlsVisible {
                 iconButton("xmark", theme, help: "Schließen", action: actions.close)
             }
         }
@@ -145,6 +152,7 @@ struct NoteView: View {
                         ))
                 }
                 .buttonStyle(.plain)
+                .focusEffectDisabled()
                 .help(swatch.displayName)
             }
         }
