@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import Foundation
 import Testing
 @testable import Haftnotiz
@@ -357,5 +358,26 @@ struct HangingIndentTests {
         #expect(bullet > 0 && bullet < box)
         #expect(nested > box)
         #expect(MarkdownStyler.hangingIndent(for: "Text") == nil)
+    }
+}
+
+@MainActor
+@Suite("Window resizing")
+struct WindowResizeTests {
+    @Test("shrinking a note far below its minimum and back lays out without an exception")
+    func shrink() {
+        let editor = NoteEditor(text: "- [ ] eine ziemlich lange Zeile, die umbrechen muss\n# Titel\nText", theme: NoteTheme(color: .yellow)) { _ in }
+        let panel = NotePanel(noteID: "x", frame: CGRect(x: 200, y: 200, width: 400, height: 400), window: WindowState(),
+                              content: AnyView(editor))
+        panel.minSize = NSSize(width: 200, height: 200)
+        panel.aspectRatio = NSSize(width: 1, height: 1)
+        panel.orderFront(nil)
+        for side in Array(stride(from: 400.0, through: 40.0, by: -15.0)) + Array(stride(from: 40.0, through: 420.0, by: 20.0)) {
+            panel.setFrame(NSRect(x: 200, y: 200, width: side, height: side), display: true)
+            panel.layoutIfNeeded()
+            panel.displayIfNeeded()
+        }
+        panel.close()
+        #expect(panel.frame.width == 420)
     }
 }

@@ -31,12 +31,16 @@ final class NotePanel: NSPanel {
         standardWindowButton(.miniaturizeButton)?.isHidden = true
         standardWindowButton(.zoomButton)?.isHidden = true
 
+        // The window manager owns the size (square notes, roll-up). The hosting view sits inside a plain
+        // container, so SwiftUI can never resize the window itself: as the window's content view it did,
+        // in the middle of a layout pass when shrinking a note, and AppKit aborted with a layout loop.
         let hosting = NSHostingView(rootView: content)
-        // The window manager owns the size (square notes, roll-up); SwiftUI must not impose a minimum,
-        // or a rolled-up note stays as tall as the editor was a moment before.
         hosting.sizingOptions = []
+        let container = NSView(frame: NSRect(origin: .zero, size: frame.size))
+        hosting.frame = container.bounds
         hosting.autoresizingMask = [.width, .height]
-        contentView = hosting
+        container.addSubview(hosting)
+        contentView = container
         apply(pinned: window.pinned, showOnAllSpaces: window.showOnAllSpaces)
     }
 

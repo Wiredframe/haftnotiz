@@ -50,6 +50,11 @@ struct NoteEditor: NSViewRepresentable {
         // Keep the text view at least as tall as the note, so a click anywhere below the text lands in it.
         scrollView.contentView.postsFrameChangedNotifications = true
         context.coordinator.observeClipView(scrollView.contentView)
+        // And once the first layout has given the clip view its size.
+        DispatchQueue.main.async { [weak textView, weak scrollView] in
+            guard let textView, let scrollView else { return }
+            textView.minSize = NSSize(width: 0, height: scrollView.contentSize.height)
+        }
 
         context.coordinator.textView = textView
         context.coordinator.apply(theme: theme)
@@ -61,9 +66,6 @@ struct NoteEditor: NSViewRepresentable {
         let coordinator = context.coordinator
         coordinator.onChange = onChange
         if coordinator.theme != theme { coordinator.apply(theme: theme) }
-        if let textView = coordinator.textView, textView.minSize.height != scrollView.contentSize.height {
-            textView.minSize = NSSize(width: 0, height: scrollView.contentSize.height)
-        }
         guard let textView = coordinator.textView, textView.string != text, !textView.hasMarkedText() else { return }
         // Changed elsewhere (another app, the folder watcher): take it over, keeping the caret if possible.
         let selection = textView.selectedRange()
@@ -109,7 +111,8 @@ struct NoteEditor: NSViewRepresentable {
             ) { [weak self, weak clipView] _ in
                 MainActor.assumeIsolated {
                     guard let height = clipView?.bounds.height else { return }
-                    self?.textView?.minSize = NSSize(width: 0, height: height)
+                    // Deferred: changing the text view's size from inside a layout pass re-enters layout.
+                    DispatchQueue.main.async { self?.textView?.minSize = NSSize(width: 0, height: height) }
                 }
             }
         }
