@@ -1,5 +1,5 @@
 // Draws the Haftnotiz app icon and writes Resources/AppIcon.icns (+ AppIcon.png for the README).
-// A full-bleed yellow note on a pad, with the bottom-right corner curling up, a ticked circle and
+// A full-bleed yellow note on a pad, with the bottom-right corner folded back, a ticked circle and
 // two lines. Run: swift Scripts/make-icon.swift
 import AppKit
 
@@ -43,50 +43,53 @@ func render(_ size: CGFloat) -> NSBitmapImageRep {
                          start: CGPoint(x: 100, y: 0), end: CGPoint(x: 924, y: 0), options: [])
     c.restoreGState()
 
-    // The curl: the sheet's bottom-right corner is lifted along this curve.
-    let p1 = CGPoint(x: 924, y: 470)   // where the curl leaves the right edge
-    let p2 = CGPoint(x: 590, y: 152)   // where it meets the bottom edge
-    let curl = CGMutablePath()
-    curl.move(to: p1)
-    curl.addCurve(to: p2, control1: CGPoint(x: 900, y: 300), control2: CGPoint(x: 760, y: 168))
+    // The corner fold: everything beyond the line A-B is lifted off the sheet and folded back over it.
+    let a = CGPoint(x: 924, y: 410)   // on the straight part of the right edge
+    let b = CGPoint(x: 630, y: 152)   // on the straight part of the bottom edge
+    let beyond = CGMutablePath()
+    beyond.addLines(between: [a, b, CGPoint(x: b.x, y: 0), CGPoint(x: 1024, y: 0), CGPoint(x: 1024, y: a.y)])
+    beyond.closeSubpath()
+    let sheetPath = roundedRect(sheet, radius)
+    let corner = sheetPath.intersection(beyond)
 
-    // 2. The top sheet, without the lifted corner.
-    let cut = CGMutablePath()
-    cut.move(to: p2)
-    cut.addLine(to: CGPoint(x: p2.x, y: 0))
-    cut.addLine(to: CGPoint(x: 1024, y: 0))
-    cut.addLine(to: CGPoint(x: 1024, y: p1.y))
-    cut.addLine(to: p1)
-    cut.addCurve(to: p2, control1: CGPoint(x: 900, y: 300), control2: CGPoint(x: 760, y: 168))
-    cut.closeSubpath()
+    // Mirror the lifted corner across the fold line.
+    let angle = atan2(a.y - b.y, a.x - b.x)
+    var mirror = CGAffineTransform(translationX: b.x, y: b.y)
+        .rotated(by: angle).scaledBy(x: 1, y: -1).rotated(by: -angle)
+        .translatedBy(x: -b.x, y: -b.y)
+    let flap = corner.copy(using: &mirror)!
 
+    // 2. The top sheet without the lifted corner (the pad shows where it was).
     c.saveGState()
-    c.addPath(roundedRect(sheet, radius))
+    c.addPath(sheetPath.subtracting(beyond))
     c.clip()
-    c.addRect(CGRect(x: 0, y: 0, width: 1024, height: 1024))
-    c.addPath(cut)
-    c.clip(using: .evenOdd)
     c.drawLinearGradient(gradient([color(1.00, 0.94, 0.55), color(0.99, 0.91, 0.50), color(0.96, 0.86, 0.45)], [0, 0.55, 1]),
                          start: CGPoint(x: 0, y: 924), end: CGPoint(x: 0, y: 152), options: [])
     c.restoreGState()
 
-    // 3. The underside of the curled corner, with a soft shadow on the pad below it.
-    let flap = CGMutablePath()
-    flap.move(to: p1)
-    flap.addCurve(to: p2, control1: CGPoint(x: 900, y: 300), control2: CGPoint(x: 760, y: 168))
-    flap.addCurve(to: p1, control1: CGPoint(x: 790, y: 240), control2: CGPoint(x: 880, y: 330))
-    flap.closeSubpath()
+    // A soft shadow the lifted corner casts onto the pad, along the fold.
     c.saveGState()
-    c.setShadow(offset: CGSize(width: -6, height: -8), blur: 22, color: color(0.35, 0.25, 0.0, 0.45))
+    c.addPath(corner)
+    c.clip()
+    c.drawLinearGradient(gradient([color(0.45, 0.32, 0.02, 0.35), color(0.45, 0.32, 0.02, 0)], [0, 1]),
+                         start: CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2),
+                         end: CGPoint(x: (a.x + b.x) / 2 + 60, y: (a.y + b.y) / 2 - 60), options: [])
+    c.restoreGState()
+
+    // 3. The folded-back corner: the paper's underside, lying on the sheet with a shadow.
+    c.saveGState()
+    c.setShadow(offset: CGSize(width: -4, height: -10), blur: 24, color: color(0.40, 0.28, 0.0, 0.40))
     c.addPath(flap)
-    c.setFillColor(color(0.93, 0.80, 0.38))
+    c.setFillColor(color(0.97, 0.87, 0.47))
     c.fillPath()
     c.restoreGState()
     c.saveGState()
     c.addPath(flap)
     c.clip()
-    c.drawLinearGradient(gradient([color(0.98, 0.90, 0.56), color(0.88, 0.74, 0.32), color(0.74, 0.58, 0.18)], [0, 0.55, 1]),
-                         start: CGPoint(x: 900, y: 420), end: CGPoint(x: 700, y: 180), options: [])
+    let mid = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+    let tip = CGPoint(x: 924, y: 152).applying(mirror)
+    c.drawLinearGradient(gradient([color(0.90, 0.76, 0.33), color(0.98, 0.89, 0.52), color(1.00, 0.95, 0.66)], [0, 0.45, 1]),
+                         start: mid, end: tip, options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
     c.restoreGState()
 
     // 4. The writing: a ticked circle with a line, then two lines.
