@@ -61,6 +61,9 @@ struct NoteEditor: NSViewRepresentable {
         let coordinator = context.coordinator
         coordinator.onChange = onChange
         if coordinator.theme != theme { coordinator.apply(theme: theme) }
+        if let textView = coordinator.textView, textView.minSize.height != scrollView.contentSize.height {
+            textView.minSize = NSSize(width: 0, height: scrollView.contentSize.height)
+        }
         guard let textView = coordinator.textView, textView.string != text, !textView.hasMarkedText() else { return }
         // Changed elsewhere (another app, the folder watcher): take it over, keeping the caret if possible.
         let selection = textView.selectedRange()

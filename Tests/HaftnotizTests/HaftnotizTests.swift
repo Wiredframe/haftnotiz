@@ -201,3 +201,93 @@ struct NoteStoreTests {
         #expect(a.id.hasPrefix("Notiz ") && a.id.hasSuffix(".md"))
     }
 }
+
+@Suite("Moving lines")
+struct MovingLinesTests {
+    private func move(_ text: String, _ selection: NSRange, up: Bool) -> (String, NSRange)? {
+        guard let m = ListEditing.movingLines(in: text, selection: selection, up: up) else { return nil }
+        return ((text as NSString).replacingCharacters(in: m.range, with: m.replacement), m.selection)
+    }
+
+    @Test("a line moves up and down, the caret travels with it")
+    func single() throws {
+        let text = "eins\nzwei\ndrei"
+        let up = try #require(move(text, NSRange(location: 6, length: 0), up: true))   // caret in "zwei"
+        #expect(up.0 == "zwei\neins\ndrei")
+        #expect(up.1 == NSRange(location: 1, length: 0))
+        let down = try #require(move(text, NSRange(location: 6, length: 0), up: false))
+        #expect(down.0 == "eins\ndrei\nzwei")
+        #expect(down.1 == NSRange(location: 11, length: 0))
+    }
+
+    @Test("the last line without a newline moves cleanly")
+    func lastLine() throws {
+        let up = try #require(move("eins\nzwei", NSRange(location: 7, length: 0), up: true))
+        #expect(up.0 == "zwei\neins")
+        let down = try #require(move("eins\nzwei", NSRange(location: 1, length: 0), up: false))
+        #expect(down.0 == "zwei\neins")
+        #expect(down.1 == NSRange(location: 6, length: 0))
+    }
+
+    @Test("selected lines move as a block; a selection ending at a line start excludes that line")
+    func block() throws {
+        let text = "a\nb\nc\nd\n"
+        let moved = try #require(move(text, NSRange(location: 2, length: 4), up: false))   // "b\nc\n"
+        #expect(moved.0 == "a\nd\nb\nc\n")
+        #expect(moved.1 == NSRange(location: 4, length: 4))
+    }
+
+    @Test("nothing moves past the edges")
+    func edges() {
+        #expect(move("eins\nzwei", NSRange(location: 0, length: 0), up: true) == nil)
+        #expect(move("eins\nzwei", NSRange(location: 6, length: 0), up: false) == nil)
+        #expect(move("", NSRange(location: 0, length: 0), up: true) == nil)
+    }
+}
+
+@Suite("Front matter keeps foreign lines")
+struct FrontMatterPreservationTests {
+    @Test("YAML lists and comments survive a colour change untouched")
+    func keepsLists() {
+        let file = "---\ncreated: 2026-11-09T12:51:03+01:00\ntags:\n  - einkauf\n  - samstag\n# Kommentar\ncolor: pink\n---\nText"
+        var (matter, body) = FrontMatter.split(file)
+        #expect(matter["tags"] == "")
+        matter["color"] = "green"
+        #expect(matter.rendered(with: body) == file.replacingOccurrences(of: "color: pink", with: "color: green"))
+        matter["mood"] = "gut"
+        body += "!"
+        #expect(matter.rendered(with: body).hasSuffix("color: green\nmood: gut\n---\nText!"))
+    }
+
+    @Test("quoted values are read without quotes")
+    func quotes() {
+        let (matter, _) = FrontMatter.split("---\ncolor: \"blue\"\n---\n")
+        #expect(matter["color"] == "blue")
+    }
+}
+
+@MainActor
+@Suite("Folder watching")
+struct FolderWatchTests {
+    @Test("an in-place rewrite (like Obsidian's) reaches the store without any manual refresh")
+    func inPlaceWrite() async throws {
+        let base = FileManager.default.temporaryDirectory.appending(path: "haftnotiz-watch-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let store = NoteStore(folder: base.appending(path: "Notizen"), stateURL: base.appending(path: "fenster.json"))
+        let url = store.folder.appending(path: "Obsidian.md")
+        try "eins".write(to: url, atomically: true, encoding: .utf8)
+        store.refreshFromDisk()
+        store.startWatching()
+        defer { store.stopWatching() }
+
+        let handle = try FileHandle(forWritingTo: url)   // overwrite in place, same inode
+        try handle.truncate(atOffset: 0)
+        try handle.write(contentsOf: Data("zwei".utf8))
+        try handle.close()
+
+        for _ in 0..<40 where store.note("Obsidian.md")?.body != "zwei" {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(store.note("Obsidian.md")?.body == "zwei")
+    }
+}

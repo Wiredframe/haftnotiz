@@ -4,7 +4,9 @@ import AppKit
 ///
 /// - Return continues a list (`- `, `- [ ] `, `1. `); Return on an empty item ends it.
 /// - Tab / ⇧Tab indent and outdent a list item.
+/// - ⌥↑ / ⌥↓ move the current line (or all selected lines) up or down.
 /// - ⌘B / ⌘I wrap the selection in `**` / `*`; ⇧⌘L turns the line into a checkbox and back.
+/// - The standard editing shortcuts are handled here too, so they work without an Edit menu.
 /// - A click on a checkbox circle ticks it (undoable), without moving the caret.
 final class MarkdownTextView: NSTextView {
     /// Take the keyboard (caret at the end) once the view is in a window, for a new note.
@@ -22,6 +24,9 @@ final class MarkdownTextView: NSTextView {
     }
 
     // MARK: - Checkboxes
+
+    /// Notes are non-activating panels: let the first click on an inactive note reach a checkbox.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
         if let range = checkboxRange(at: convert(event.locationInWindow, from: nil)) {
@@ -116,6 +121,26 @@ final class MarkdownTextView: NSTextView {
         }
     }
 
+    // MARK: - Moving lines
+
+    override func keyDown(with event: NSEvent) {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
+        if mods == .option, event.keyCode == 126 || event.keyCode == 125 {
+            moveLines(up: event.keyCode == 126)
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    private func moveLines(up: Bool) {
+        guard let move = ListEditing.movingLines(in: string, selection: selectedRange(), up: up) else {
+            NSSound.beep()
+            return
+        }
+        replace(move.range, with: move.replacement, selecting: move.selection)
+        scrollRangeToVisible(move.selection)
+    }
+
     // MARK: - Shortcuts
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -130,6 +155,29 @@ final class MarkdownTextView: NSTextView {
             return true
         case ([.command, .shift], "l"):
             toggleChecklist()
+            return true
+        case ([.command], "x"):
+            cut(nil)
+            return true
+        case ([.command], "c"):
+            copy(nil)
+            return true
+        case ([.command], "v"):
+            pasteAsPlainText(nil)
+            return true
+        case ([.command], "a"):
+            selectAll(nil)
+            return true
+        case ([.command], "z"):
+            undoManager?.undo()
+            return true
+        case ([.command, .shift], "z"):
+            undoManager?.redo()
+            return true
+        case ([.command], "f"):
+            let item = NSMenuItem()
+            item.tag = NSTextFinder.Action.showFindInterface.rawValue
+            performTextFinderAction(item)
             return true
         default:
             return super.performKeyEquivalent(with: event)

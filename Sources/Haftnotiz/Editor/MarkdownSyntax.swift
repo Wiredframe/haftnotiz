@@ -150,6 +150,47 @@ enum ListEditing {
         return marker
     }
 
+    /// ⌥↑ / ⌥↓: moves the whole lines touched by `selection` past the neighbouring line. Returns the
+    /// range to replace, its replacement and the selection afterwards (same text selected), or nil at
+    /// the start / end of the text.
+    static func movingLines(in text: String, selection: NSRange, up: Bool)
+        -> (range: NSRange, replacement: String, selection: NSRange)? {
+        let ns = text as NSString
+        guard ns.length > 0 else { return nil }
+        // A selection ending right after a newline does not include the next line.
+        var span = selection
+        if span.length > 0, ns.character(at: span.upperBound - 1) == 0x0A { span.length -= 1 }
+        let block = ns.lineRange(for: span)
+        guard block.length > 0 else { return nil }
+        let blockText = ns.substring(with: block)
+
+        let range: NSRange
+        let replacement: String
+        let blockStart: Int   // where the block begins inside the replacement
+        if up {
+            guard block.location > 0 else { return nil }
+            let previous = ns.lineRange(for: NSRange(location: block.location - 1, length: 0))
+            let previousText = ns.substring(with: previous)
+            range = NSRange(location: previous.location, length: previous.length + block.length)
+            replacement = blockText.hasSuffix("\n") ? blockText + previousText : blockText + "\n" + previousText.dropLast()
+            blockStart = 0
+        } else {
+            guard block.upperBound < ns.length else { return nil }
+            let next = ns.lineRange(for: NSRange(location: block.upperBound, length: 0))
+            let nextText = ns.substring(with: next)
+            range = NSRange(location: block.location, length: block.length + next.length)
+            if nextText.hasSuffix("\n") {
+                replacement = nextText + blockText
+                blockStart = next.length
+            } else {
+                replacement = nextText + "\n" + blockText.dropLast()
+                blockStart = next.length + 1
+            }
+        }
+        let shift = range.location + blockStart - block.location
+        return (range, replacement, NSRange(location: selection.location + shift, length: selection.length))
+    }
+
     /// ⇧⌘L: a checkbox line loses its box (keeping a bullet), anything else becomes a checkbox.
     static func togglingCheckbox(_ line: String) -> String {
         if let item = parse(line) {

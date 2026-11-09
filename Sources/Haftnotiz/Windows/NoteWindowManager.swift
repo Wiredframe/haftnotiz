@@ -81,6 +81,7 @@ final class NoteWindowManager: NSObject, NSWindowDelegate {
         )
         let view = NoteView(store: store, id: id, actions: actions, focusOnAppear: shouldFocus(id))
         let panel = NotePanel(noteID: id, frame: frame, window: note.window, content: AnyView(view))
+        panel.onClose = actions.close
         panels[id] = panel
         savedFrames[id] = frame
         place(panel)
@@ -203,6 +204,7 @@ final class NoteWindowManager: NSObject, NSWindowDelegate {
 
     // MARK: - NSWindowDelegate
 
+    func windowDidBecomeKey(_ notification: Notification) { store.refreshFromDisk() }
     func windowDidMove(_ notification: Notification) { saveFrame(notification) }
     func windowDidResize(_ notification: Notification) { saveFrame(notification) }
 

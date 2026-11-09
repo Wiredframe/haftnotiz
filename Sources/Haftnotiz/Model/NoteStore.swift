@@ -18,7 +18,9 @@ final class NoteStore {
     @ObservationIgnored private var diskText: [String: String] = [:]
     @ObservationIgnored private var pendingWrites: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var pendingStateSave: Task<Void, Never>?
-    @ObservationIgnored private var watcher: DispatchSourceFileSystemObject?
+    /// Notes deleted since the last state save, whose entries must leave the state file.
+    @ObservationIgnored private var forgotten: Set<String> = []
+    @ObservationIgnored private var watcher: FSEventStreamRef?
     @ObservationIgnored private let writeDelay: Duration
 
     /// Called when a note's file disappeared from disk, so its window can close.
@@ -192,6 +194,7 @@ final class NoteStore {
         }
         diskText[id] = nil
         notes.removeAll { $0.id == id }
+        forgotten.insert(id)
         scheduleStateSave()
     }
 
@@ -239,6 +242,8 @@ final class NoteStore {
         pendingStateSave = nil
         // Keep the state of notes in other folders, so switching folders back and forth loses nothing.
         var states = readStates()
+        for id in forgotten { states[id] = nil }
+        forgotten.removeAll()
         for note in notes { states[note.id] = note.window }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -269,24 +274,34 @@ final class NoteStore {
         startWatching()
     }
 
-    /// Re-reads the folder whenever a file in it is added, removed or replaced.
+    /// Re-reads the folder whenever a file in it is added, removed or changed. FSEvents with file-level
+    /// events, because editors like Obsidian rewrite a file in place, which a plain directory watch
+    /// never reports.
     func startWatching() {
         stopWatching()
-        let fd = open(folder.path, O_EVTONLY)
-        guard fd >= 0 else { return }
-        let source = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .main
+        var context = FSEventStreamContext(
+            version: 0, info: Unmanaged.passUnretained(self).toOpaque(), retain: nil, release: nil, copyDescription: nil
         )
-        source.setEventHandler { [weak self] in
-            MainActor.assumeIsolated { self?.refreshFromDisk() }
+        let callback: FSEventStreamCallback = { _, info, _, _, _, _ in
+            guard let info else { return }
+            let store = Unmanaged<NoteStore>.fromOpaque(info).takeUnretainedValue()
+            MainActor.assumeIsolated { store.refreshFromDisk() }
         }
-        source.setCancelHandler { Darwin.close(fd) }
-        source.resume()
-        watcher = source
+        guard let stream = FSEventStreamCreate(
+            nil, callback, &context, [folder.path] as CFArray,
+            FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 0.2,
+            FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer)
+        ) else { return }
+        FSEventStreamSetDispatchQueue(stream, .main)
+        FSEventStreamStart(stream)
+        watcher = stream
     }
 
     func stopWatching() {
-        watcher?.cancel()
-        watcher = nil
+        guard let watcher else { return }
+        FSEventStreamStop(watcher)
+        FSEventStreamInvalidate(watcher)
+        FSEventStreamRelease(watcher)
+        self.watcher = nil
     }
 }

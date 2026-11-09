@@ -11,7 +11,7 @@ completely offline.
 
 ## Features
 
-- **Sticky notes** with rounded corners and shadow, six paper colours or frosted glass.
+- **Sticky notes** with rounded corners and shadow, in six paper colours.
 - **Pin** a note to keep it above other windows (per note), optionally on all Spaces.
 - **Roll up** a note to its header with a double-click.
 - **Simple Markdown**, styled live with the syntax kept visible: headings, `- ` bullets,
@@ -19,6 +19,7 @@ completely offline.
   `` `code` ``, `~~strike~~`, links and bare URLs.
 - **Plain files:** one Markdown file per note (default `~/Vault/Wiredframe/Notizen/Haftnotiz`,
   changeable from the menu bar). A small YAML front matter keeps the creation date and colour.
+  Other front matter (tags, lists, anything Obsidian adds) is kept untouched.
   Window position, pin and roll-up state stay on this Mac in
   `~/Library/Application Support/Haftnotiz/fenster.json`. Edits made in other apps show up live;
   deleting a note moves its file to the Trash.
@@ -31,9 +32,11 @@ completely offline.
 | **⌘N** | New note |
 | **Return** in a list | Next item (an empty item ends the list) |
 | **Tab / ⇧Tab** in a list | Indent / outdent the item |
+| **⌥↑ / ⌥↓** | Move the line (or all selected lines) up / down |
 | **⇧⌘L** | Turn the line into a checkbox and back |
 | **⌘B / ⌘I** | Bold / italic |
 | **⌘F** | Find in the note |
+| **⌘W** | Close the note (an empty note goes away) |
 
 ## Build
 

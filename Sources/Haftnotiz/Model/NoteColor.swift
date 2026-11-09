@@ -23,7 +23,7 @@ enum NoteColor: String, Codable, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// The paper fill (solid notes, and a faint tint behind glass).
+    /// The paper fill.
     var fill: Color {
         switch self {
         case .yellow: Color(red: 1.00, green: 0.90, blue: 0.46)
@@ -83,26 +83,17 @@ enum NoteColor: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// How a note's background is rendered: paper, or frosted glass showing the desktop.
-enum NoteMaterial: String, Codable, Sendable {
-    case solid
-    case glass
-}
-
-/// The resolved palette of a note, so views ask for a role instead of branching on solid/glass.
-/// Glass uses appearance-adaptive system colours (they follow light/dark backdrops).
+/// The resolved palette of a note.
 struct NoteTheme: Equatable {
     let color: NoteColor
-    let material: NoteMaterial
 
-    var isGlass: Bool { material == .glass }
     var accent: Color { color.accent }
-    var ink: Color { isGlass ? .primary : color.solidInk }
-    var secondary: Color { isGlass ? .secondary : color.solidSecondary }
-    var checkbox: Color { isGlass ? color.accent : color.solidCheckbox }
+    var ink: Color { color.solidInk }
+    var secondary: Color { color.solidSecondary }
+    var checkbox: Color { color.solidCheckbox }
 
-    var nsInk: NSColor { isGlass ? .labelColor : NSColor(color.solidInk) }
-    var nsSecondary: NSColor { isGlass ? .secondaryLabelColor : NSColor(color.solidSecondary) }
+    var nsInk: NSColor { NSColor(color.solidInk) }
+    var nsSecondary: NSColor { NSColor(color.solidSecondary) }
     var nsAccent: NSColor { NSColor(color.accent) }
-    var nsCheckbox: NSColor { isGlass ? NSColor(color.accent) : NSColor(color.solidCheckbox) }
+    var nsCheckbox: NSColor { NSColor(color.solidCheckbox) }
 }

@@ -33,10 +33,10 @@ struct Note: Identifiable, Equatable, Sendable {
     }
 }
 
-/// Per-Mac window state of a note, kept in Application Support rather than in the file.
+/// Per-Mac window state of a note, kept in Application Support rather than in the file. Unknown keys
+/// (like the former `material`) are ignored.
 struct WindowState: Codable, Equatable, Sendable {
     var frame: CGRect?
-    var material: NoteMaterial = .solid
     /// Pinned: the note floats above other windows.
     var pinned = false
     var showOnAllSpaces = false
@@ -48,7 +48,6 @@ struct WindowState: Codable, Equatable, Sendable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         frame = try c.decodeIfPresent(CGRect.self, forKey: .frame)
-        material = try c.decodeIfPresent(NoteMaterial.self, forKey: .material) ?? .solid
         pinned = try c.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
         showOnAllSpaces = try c.decodeIfPresent(Bool.self, forKey: .showOnAllSpaces) ?? false
         isCollapsed = try c.decodeIfPresent(Bool.self, forKey: .isCollapsed) ?? false
@@ -56,51 +55,55 @@ struct WindowState: Codable, Equatable, Sendable {
     }
 }
 
-/// A minimal YAML front matter: flat `key: value` lines between `---` fences. Order and unknown keys
-/// (e.g. ones Obsidian adds) are kept as they are.
+/// A minimal YAML front matter between `---` fences. Every line is kept verbatim (lists, comments,
+/// whatever Obsidian or the user put there); only simple top-level `key: value` lines are read and
+/// written by the app.
 struct FrontMatter: Equatable, Sendable {
-    private(set) var fields: [(key: String, value: String)] = []
+    private(set) var lines: [String] = []
 
-    static func == (lhs: FrontMatter, rhs: FrontMatter) -> Bool {
-        lhs.fields.map(\.key) == rhs.fields.map(\.key) && lhs.fields.map(\.value) == rhs.fields.map(\.value)
+    var isEmpty: Bool { lines.isEmpty }
+
+    private func index(of key: String) -> Int? {
+        lines.firstIndex { line in
+            guard let colon = line.firstIndex(of: ":"), !line.hasPrefix(" "), !line.hasPrefix("\t") else { return false }
+            return line[..<colon].trimmingCharacters(in: .whitespaces) == key
+        }
     }
 
     subscript(key: String) -> String? {
-        get { fields.first { $0.key == key }?.value }
+        get {
+            guard let i = index(of: key), let colon = lines[i].firstIndex(of: ":") else { return nil }
+            var value = lines[i][lines[i].index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            if value.count >= 2, value.first == value.last, value.first == "\"" || value.first == "'" {
+                value = String(value.dropFirst().dropLast())
+            }
+            return value
+        }
         set {
-            if let index = fields.firstIndex(where: { $0.key == key }) {
-                if let newValue { fields[index].value = newValue } else { fields.remove(at: index) }
-            } else if let newValue {
-                fields.append((key, newValue))
+            let i = index(of: key)
+            switch (i, newValue) {
+            case let (i?, value?): lines[i] = "\(key): \(value)"
+            case let (i?, nil): lines.remove(at: i)
+            case let (nil, value?): lines.append("\(key): \(value)")
+            case (nil, nil): break
             }
         }
     }
 
-    var isEmpty: Bool { fields.isEmpty }
-
     /// Splits a file into its front matter and body. A file without front matter is all body.
     static func split(_ text: String) -> (FrontMatter, String) {
-        let lines = text.replacingOccurrences(of: "\r\n", with: "\n")
+        let all = text.replacingOccurrences(of: "\r\n", with: "\n")
             .split(separator: "\n", omittingEmptySubsequences: false)
-        guard lines.first == "---",
-              let close = lines.indices.dropFirst().first(where: { lines[$0] == "---" })
+        guard all.first == "---",
+              let close = all.indices.dropFirst().first(where: { all[$0] == "---" })
         else { return (FrontMatter(), text) }
-        var matter = FrontMatter()
-        for line in lines[1..<close] {
-            guard let colon = line.firstIndex(of: ":") else { continue }
-            let key = line[..<colon].trimmingCharacters(in: .whitespaces)
-            var value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
-            if value.count >= 2, value.hasPrefix("\""), value.hasSuffix("\"") { value = String(value.dropFirst().dropLast()) }
-            if !key.isEmpty { matter.fields.append((key, value)) }
-        }
-        return (matter, lines[(close + 1)...].joined(separator: "\n"))
+        return (FrontMatter(lines: all[1..<close].map(String.init)), all[(close + 1)...].joined(separator: "\n"))
     }
 
     /// Front matter (if any) followed by the body.
     func rendered(with body: String) -> String {
-        guard !fields.isEmpty else { return body }
-        let header = fields.map { "\($0.key): \($0.value)" }.joined(separator: "\n")
-        return "---\n\(header)\n---\n\(body)"
+        guard !lines.isEmpty else { return body }
+        return "---\n" + lines.joined(separator: "\n") + "\n---\n" + body
     }
 
     // MARK: - Dates

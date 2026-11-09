@@ -14,7 +14,7 @@ struct NoteView: View {
 
     var body: some View {
         if let note = store.note(id) {
-            let theme = NoteTheme(color: note.color, material: note.window.material)
+            let theme = NoteTheme(color: note.color)
             VStack(spacing: 0) {
                 header(note, theme)
                 if !note.window.isCollapsed {
@@ -32,7 +32,7 @@ struct NoteView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(NoteBackground(color: note.color, material: note.window.material))
+            .background(NoteBackground(color: note.color))
             .ignoresSafeArea()
             .onHover { inside in withAnimation(.easeInOut(duration: 0.15)) { hovering = inside } }
         }
@@ -101,10 +101,6 @@ struct NoteView: View {
 
     private func moreMenu(_ note: Note, _ theme: NoteTheme) -> some View {
         Menu {
-            Toggle("Glas", isOn: Binding(
-                get: { note.window.material == .glass },
-                set: { glass in store.updateWindow(id) { $0.material = glass ? .glass : .solid } }
-            ))
             Toggle("Auf allen Schreibtischen", isOn: Binding(
                 get: { note.window.showOnAllSpaces }, set: { _ in actions.toggleAllSpaces() }
             ))

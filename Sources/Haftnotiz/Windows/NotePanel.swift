@@ -23,6 +23,7 @@ final class NotePanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
+        appearance = NSAppearance(named: .aqua)   // light paper: menus, popovers and scrollers to match
         isReleasedWhenClosed = false
         animationBehavior = .utilityWindow
         minSize = NSSize(width: 180, height: 120)
@@ -45,4 +46,16 @@ final class NotePanel: NSPanel {
     }
 
     override var canBecomeKey: Bool { true }
+
+    /// ⌘W: close the note (the app has no File menu that would do it).
+    var onClose: (() -> Void)?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
+        if mods == .command, event.charactersIgnoringModifiers?.lowercased() == "w" {
+            onClose?()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 }
