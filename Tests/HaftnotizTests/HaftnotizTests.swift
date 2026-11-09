@@ -1,0 +1,203 @@
+import Foundation
+import Testing
+@testable import Haftnotiz
+
+@Suite("Markdown syntax")
+struct MarkdownSyntaxTests {
+    private func kinds(_ line: String) -> [MarkdownSyntax.Kind] { MarkdownSyntax.spans(in: line).map(\.kind) }
+
+    private func text(_ line: String, _ kind: MarkdownSyntax.Kind) -> [String] {
+        MarkdownSyntax.spans(in: line).filter { $0.kind == kind }.map { (line as NSString).substring(with: $0.range) }
+    }
+
+    @Test("headings carry their level and a dimmed marker")
+    func headings() {
+        #expect(kinds("## Markt") == [.heading(2), .marker])
+        #expect(text("## Markt", .marker) == ["## "])
+        #expect(kinds("#hashtag").isEmpty)
+    }
+
+    @Test("checkboxes cover the dash and box; ticked lines are struck through")
+    func checkboxes() {
+        #expect(text("- [ ] Milch", .checkbox(done: false)) == ["- [ ]"])
+        #expect(text("  - [x] Milch", .checkbox(done: true)) == ["- [x]"])
+        #expect(text("- [x] Milch", .done) == [" Milch"])
+        #expect(kinds("- [] Milch") == [.bullet])
+    }
+
+    @Test("bullets and numbers are recognised, a dash without space is not")
+    func bullets() {
+        #expect(text("- eins", .bullet) == ["-"])
+        #expect(text("12. zwölf", .bullet) == ["12."])
+        #expect(kinds("-minus").isEmpty)
+    }
+
+    @Test("inline styles, with markers")
+    func inline() {
+        #expect(text("ein **fetter** Satz", .bold) == ["**fetter**"])
+        #expect(text("ein *schräger* Satz", .italic) == ["*schräger*"])
+        #expect(text("**fett**", .italic).isEmpty)
+        #expect(text("ein `code` Stück", .code) == ["`code`"])
+        #expect(text("~~weg~~", .strike) == ["~~weg~~"])
+        #expect(text("ein **fetter** Satz", .marker) == ["**", "**"])
+    }
+
+    @Test("nothing is styled inside code")
+    func codeWins() {
+        #expect(text("`a **b** c`", .bold).isEmpty)
+    }
+
+    @Test("links and bare URLs")
+    func links() {
+        #expect(MarkdownSyntax.spans(in: "[Seite](https://example.com)").contains {
+            $0.kind == .link("https://example.com") && $0.range == NSRange(location: 1, length: 5)
+        })
+        #expect(text("siehe https://example.com/a.", .link("https://example.com/a")) == ["https://example.com/a"])
+    }
+}
+
+@Suite("List editing")
+struct ListEditingTests {
+    @Test("Return continues bullets, numbers and checkboxes")
+    func continues() {
+        #expect(ListEditing.returnAction(after: "- eins") == .continueWith("- "))
+        #expect(ListEditing.returnAction(after: "  * eins") == .continueWith("  * "))
+        #expect(ListEditing.returnAction(after: "9. neun") == .continueWith("10. "))
+        #expect(ListEditing.returnAction(after: "- [x] erledigt") == .continueWith("- [ ] "))
+        #expect(ListEditing.returnAction(after: "Text") == .plain)
+    }
+
+    @Test("Return on an empty item ends the list")
+    func ends() {
+        #expect(ListEditing.returnAction(after: "- ") == .endList(prefixLength: 2))
+        #expect(ListEditing.returnAction(after: "    - [ ] ") == .endList(prefixLength: 10))
+    }
+
+    @Test("⇧⌘L toggles a checkbox")
+    func toggle() {
+        #expect(ListEditing.togglingCheckbox("Milch") == "- [ ] Milch")
+        #expect(ListEditing.togglingCheckbox("  - Milch") == "  - [ ] Milch")
+        #expect(ListEditing.togglingCheckbox("- [x] Milch") == "- Milch")
+    }
+}
+
+@Suite("Front matter")
+struct FrontMatterTests {
+    @Test("split and render round-trip, unknown keys kept")
+    func roundTrip() {
+        let file = "---\ncreated: 2026-11-09T12:51:03+01:00\ncolor: blue\ntags: einkauf\n---\n# Markt\n- [ ] Käse"
+        let (matter, body) = FrontMatter.split(file)
+        #expect(matter["color"] == "blue")
+        #expect(matter["tags"] == "einkauf")
+        #expect(body == "# Markt\n- [ ] Käse")
+        #expect(matter.rendered(with: body) == file)
+    }
+
+    @Test("a file without front matter is all body")
+    func none() {
+        let (matter, body) = FrontMatter.split("Hallo\n---\nWelt")
+        #expect(matter.isEmpty)
+        #expect(body == "Hallo\n---\nWelt")
+    }
+
+    @Test("created dates round-trip")
+    func dates() throws {
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        let parsed = try #require(FrontMatter.date(from: FrontMatter.string(from: date)))
+        #expect(abs(parsed.timeIntervalSince(date)) < 1)
+    }
+
+    @Test("the title skips markers and empty lines")
+    func title() {
+        #expect(Note.title(of: "\n# **Einkauf** für Samstag\nrest") == "Einkauf für Samstag")
+        #expect(Note.title(of: "- [ ] Milch") == "Milch")
+        #expect(Note.title(of: "  \n") == "")
+    }
+}
+
+@MainActor
+@Suite("Note store")
+struct NoteStoreTests {
+    private func makeStore() throws -> (NoteStore, URL) {
+        let base = FileManager.default.temporaryDirectory.appending(path: "haftnotiz-\(UUID().uuidString)")
+        let store = NoteStore(folder: base.appending(path: "Notizen"), stateURL: base.appending(path: "fenster.json"),
+                              writeDelay: .zero)
+        return (store, base)
+    }
+
+    private func frame() -> CGRect { CGRect(x: 10, y: 10, width: 200, height: 200) }
+
+    @Test("a note reaches the disk with front matter, and a fresh store reads it back")
+    func persists() throws {
+        let (store, base) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let note = store.createNote(color: .green, frame: frame())
+        store.setBody(note.id, "# Hallo\n- [ ] Welt")
+        store.updateWindow(note.id) { $0.pinned = true }
+        store.flush()
+
+        let text = try String(contentsOf: store.folder.appending(path: note.id), encoding: .utf8)
+        #expect(text.hasPrefix("---\ncreated: "))
+        #expect(text.contains("color: green"))
+        #expect(text.hasSuffix("---\n# Hallo\n- [ ] Welt"))
+
+        let reread = NoteStore(folder: store.folder, stateURL: base.appending(path: "fenster.json"))
+        let loaded = try #require(reread.note(note.id))
+        #expect(loaded.body == "# Hallo\n- [ ] Welt")
+        #expect(loaded.color == .green)
+        #expect(loaded.created != nil)
+        #expect(loaded.window.pinned)
+        #expect(loaded.window.frame == frame())
+    }
+
+    @Test("an empty note never touches the disk and vanishes on close")
+    func emptyNote() throws {
+        let (store, base) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let note = store.createNote(color: .yellow, frame: frame())
+        store.flush()
+        #expect(!FileManager.default.fileExists(atPath: store.folder.appending(path: note.id).path))
+        store.close(note.id)
+        #expect(store.notes.isEmpty)
+    }
+
+    @Test("closing keeps a note with text, marked closed")
+    func closeKeeps() throws {
+        let (store, base) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let note = store.createNote(color: .yellow, frame: frame(), body: "Text")
+        store.close(note.id)
+        #expect(store.note(note.id)?.window.isOpen == false)
+    }
+
+    @Test("files added, edited and removed outside the app are picked up")
+    func outsideChanges() throws {
+        let (store, base) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let url = store.folder.appending(path: "Von außen.md")
+        try "Erste Fassung".write(to: url, atomically: true, encoding: .utf8)
+        store.refreshFromDisk()
+        #expect(store.note("Von außen.md")?.body == "Erste Fassung")
+
+        try "Zweite Fassung".write(to: url, atomically: true, encoding: .utf8)
+        store.refreshFromDisk()
+        #expect(store.note("Von außen.md")?.body == "Zweite Fassung")
+
+        var removed: [String] = []
+        store.onNoteRemoved = { removed.append($0) }
+        try FileManager.default.removeItem(at: url)
+        store.refreshFromDisk()
+        #expect(store.note("Von außen.md") == nil)
+        #expect(removed == ["Von außen.md"])
+    }
+
+    @Test("new notes get unique, stable file names")
+    func uniqueNames() throws {
+        let (store, base) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let a = store.createNote(color: .yellow, frame: frame())
+        let b = store.createNote(color: .yellow, frame: frame())
+        #expect(a.id != b.id)
+        #expect(a.id.hasPrefix("Notiz ") && a.id.hasSuffix(".md"))
+    }
+}
