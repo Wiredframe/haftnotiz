@@ -58,6 +58,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var keyMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Only one Haftnotiz at a time (e.g. a second copy of the app): two would edit the same files.
+        if let bundleID = Bundle.main.bundleIdentifier,
+           let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+               .first(where: { $0 != NSRunningApplication.current }) {
+            running.activate()
+            NSApp.terminate(nil)
+            return
+        }
         NSApp.setActivationPolicy(.regular)
         AppModel.shared.bootstrap()
         // ⌘N while a note is key (the menu bar item's shortcut only works while its menu is open).
@@ -71,10 +79,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        guard started else { return }
         AppModel.shared.store.refreshFromDisk()
     }
 
+    private var started: Bool { keyMonitor != nil }
+
     func applicationWillTerminate(_ notification: Notification) {
+        guard started else { return }   // a second instance quitting right away touches nothing
         AppModel.shared.store.flush()
     }
 
