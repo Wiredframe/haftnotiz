@@ -71,13 +71,13 @@ final class AppModel {
 
     func openSearch() {
         if searchWindow == nil {
-            let panel = NSPanel(
+            // Borderless, so all four corners are rounded by the content (a titled window rounds only the top).
+            let panel = SearchPanel(
                 contentRect: NSRect(x: 0, y: 0, width: 620, height: 400),
-                styleMask: [.titled, .closable, .fullSizeContentView],
+                styleMask: [.borderless],
                 backing: .buffered, defer: false
             )
-            panel.titleVisibility = .hidden
-            panel.titlebarAppearsTransparent = true
+            panel.hasShadow = true
             panel.isFloatingPanel = true
             panel.level = .floating
             panel.hidesOnDeactivate = false
@@ -85,9 +85,6 @@ final class AppModel {
             panel.isMovableByWindowBackground = true
             panel.isOpaque = false
             panel.backgroundColor = .clear
-            for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-                panel.standardWindowButton(button)?.isHidden = true
-            }
             panel.contentView = NSHostingView(rootView: SearchView())
             searchWindow = panel
         }
@@ -140,4 +137,9 @@ final class AppModel {
 
     Jede Notiz ist eine Markdown-Datei. Der Pin oben rechts hält sie im Vordergrund, ein Doppelklick auf die Kopfzeile klappt sie zu.
     """
+}
+
+/// The search palette's window: borderless, but it must take the keyboard.
+private final class SearchPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
 }

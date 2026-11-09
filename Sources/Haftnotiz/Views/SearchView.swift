@@ -24,6 +24,8 @@ struct SearchView: View {
         }
         .frame(width: 620, height: 400)
         .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.black.opacity(0.12), lineWidth: 0.5))
         .ignoresSafeArea()
         .task {
             searchFocused = true
@@ -101,10 +103,11 @@ private struct SearchRow: View {
     private var snippet: String {
         let lines = note.body.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
         let q = query.trimmingCharacters(in: .whitespaces)
-        if !q.isEmpty, let hit = lines.first(where: { $0.localizedCaseInsensitiveContains(q) }), Note.title(of: hit) != note.title {
+        let plain = lines.map { Note.title(of: $0) }.filter { !$0.isEmpty }
+        if !q.isEmpty, let hit = plain.dropFirst().first(where: { $0.localizedCaseInsensitiveContains(q) }) {
             return hit
         }
-        return lines.dropFirst().first { !$0.isEmpty } ?? ""
+        return plain.dropFirst().first ?? ""
     }
 
     var body: some View {
