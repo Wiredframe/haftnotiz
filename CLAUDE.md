@@ -14,7 +14,8 @@ swift build && swift test
 ## Architecture
 
 - `Model/NoteStore` (`@MainActor @Observable`): one `.md` file per note in the notes folder
-  (`UserDefaults notesFolder`, default `~/Vault/Wiredframe/Notizen/Haftnotiz`). Debounced atomic
+  (`UserDefaults notesFolder`, default `~/Documents/Haftnotiz`; on the author's Mac set to
+  `~/Vault/Wiredframe/Notizen/Haftnotiz`). Debounced atomic
   writes; `diskText` tells own writes from outside edits; the folder is watched with FSEvents
   file-level events (a directory watch misses in-place rewrites, which is how Obsidian saves) and
   re-read when a note becomes key; a note with a pending write is never overwritten from disk. A new note

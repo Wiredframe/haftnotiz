@@ -17,8 +17,8 @@ completely offline.
 - **Simple Markdown**, styled live with the syntax kept visible: headings, `- ` bullets,
   numbered lists, `- [ ]` checkboxes (click to tick), quotes, `**bold**`, `*italic*`,
   `` `code` ``, `~~strike~~`, links and bare URLs.
-- **Plain files:** one Markdown file per note (default `~/Vault/Wiredframe/Notizen/Haftnotiz`,
-  changeable from the menu bar). A small YAML front matter keeps the creation date and colour.
+- **Plain files:** one Markdown file per note (default `~/Documents/Haftnotiz`, changeable from
+  the menu bar, e.g. to a folder in your Obsidian vault). A small YAML front matter keeps the creation date and colour.
   Other front matter (tags, lists, anything Obsidian adds) is kept untouched.
   Window position, pin and roll-up state stay on this Mac in
   `~/Library/Application Support/Haftnotiz/fenster.json`. Edits made in other apps show up live;
@@ -48,6 +48,14 @@ swift Scripts/make-icon.swift   # redraw Resources/AppIcon.icns
 ```
 
 Requires macOS 14 or later (Apple silicon).
+
+## Install
+
+```sh
+brew install --cask wiredframe/tap/haftnotiz
+```
+
+Haftnotiz is signed with a Developer ID but not notarized; the cask clears the quarantine flag.
 
 ## Credits
 

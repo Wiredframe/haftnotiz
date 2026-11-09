@@ -41,14 +41,9 @@ final class NoteStore {
 
     private static let folderKey = "notesFolder"
 
-    /// `~/Vault/Wiredframe/Notizen/Haftnotiz` when the vault exists, else Application Support.
+    /// `~/Documents/Haftnotiz` until another folder is chosen from the menu bar.
     static var defaultFolder: URL {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let vault = home.appending(path: "Vault/Wiredframe/Notizen", directoryHint: .isDirectory)
-        if FileManager.default.fileExists(atPath: vault.path) {
-            return vault.appending(path: "Haftnotiz", directoryHint: .isDirectory)
-        }
-        return supportDirectory.appending(path: "Notizen", directoryHint: .isDirectory)
+        URL.documentsDirectory.appending(path: "Haftnotiz", directoryHint: .isDirectory)
     }
 
     static var supportDirectory: URL {

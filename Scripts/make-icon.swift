@@ -71,9 +71,14 @@ func render(_ size: CGFloat) -> NSBitmapImageRep {
     c.saveGState()
     c.addPath(corner)
     c.clip()
-    c.drawLinearGradient(gradient([color(0.45, 0.32, 0.02, 0.35), color(0.45, 0.32, 0.02, 0)], [0, 1]),
-                         start: CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2),
-                         end: CGPoint(x: (a.x + b.x) / 2 + 60, y: (a.y + b.y) / 2 - 60), options: [])
+    // Perpendicular to the fold, so the shadow is equally strong along the whole fold line.
+    let length = hypot(a.x - b.x, a.y - b.y)
+    let normal = CGPoint(x: (a.y - b.y) / length, y: -(a.x - b.x) / length)   // points into the corner
+    let foldMid = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+    c.drawLinearGradient(gradient([color(0.45, 0.32, 0.02, 0.38), color(0.45, 0.32, 0.02, 0)], [0, 1]),
+                         start: foldMid,
+                         end: CGPoint(x: foldMid.x + normal.x * 110, y: foldMid.y + normal.y * 110),
+                         options: [.drawsBeforeStartLocation])
     c.restoreGState()
 
     // 3. The folded-back corner: the paper's underside, lying on the sheet with a shadow.
