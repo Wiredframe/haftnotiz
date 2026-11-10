@@ -12,7 +12,7 @@ struct Note: Identifiable, Equatable, Sendable {
     var window: WindowState
     var modified: Date
 
-    var color: NoteColor { NoteColor(rawValue: frontMatter["color"] ?? "") ?? .yellow }
+    var color: NoteColor { NoteColor(stored: frontMatter["color"] ?? "") ?? .yellow }
     var created: Date? { frontMatter["created"].flatMap(FrontMatter.date(from:)) }
 
     /// The file's full contents: front matter plus body.
