@@ -133,7 +133,7 @@ final class AppModel {
     - [ ] Zeile mit `- [ ] ` beginnen oder ⇧⌘L drücken
     - [x] Ein Klick auf den Kreis hakt ab
     - Aufzählungen mit `- `, einrücken mit Tab
-    **fett** (⌘B), *kursiv* (⌘I), `Code`, ~~durchgestrichen~~
+    **fett** (⌘B), *kursiv* (⌘I), ~~durchgestrichen~~ (⇧⌘S), `Code` (⌘E)
 
     Jede Notiz ist eine Markdown-Datei. Der Pin oben rechts hält sie im Vordergrund, ein Doppelklick auf die Kopfzeile klappt sie zu.
     """

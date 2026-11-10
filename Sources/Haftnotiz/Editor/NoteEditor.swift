@@ -100,6 +100,7 @@ struct NoteEditor: NSViewRepresentable {
             if let layoutManager = textView.layoutManager as? CheckboxLayoutManager {
                 layoutManager.openColor = theme.nsSecondary
                 layoutManager.doneColor = theme.nsCheckbox
+                layoutManager.ruleColor = theme.nsSecondary.withAlphaComponent(0.45)
             }
             styler.applyAll(to: storage)
             textView.needsDisplay = true

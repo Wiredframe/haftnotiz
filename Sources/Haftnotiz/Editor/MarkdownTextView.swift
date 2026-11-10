@@ -5,7 +5,12 @@ import AppKit
 /// - Return continues a list (`- `, `- [ ] `, `1. `); Return on an empty item ends it.
 /// - Tab / ⇧Tab indent and outdent a list item.
 /// - ⌥↑ / ⌥↓ move the current line (or all selected lines) up or down.
-/// - ⌘B / ⌘I wrap the selection in `**` / `*`; ⇧⌘L turns the line into a checkbox and back.
+/// - ⌘B / ⌘I / ⇧⌘S / ⌘E wrap the selection in `**` / `*` / `~~` / backticks, or unwrap it;
+///   ⌘K makes a link.
+/// - On every selected line: ⌘1–⌘6 heading, ⌘0 plain text (no heading, list or quote), ⇧⌘8 / ⇧⌘7 / ⇧⌘L bullet, numbered
+///   or checkbox list and back, ⇧⌘D duplicate, ⇧⌘K delete.
+/// - The context menu offers all of this (with the shortcuts, for those who forget them), plus
+///   clearing formatting, quotes and a horizontal rule.
 /// - The standard editing shortcuts are handled here too, so they work without an Edit menu.
 /// - A click on a checkbox circle ticks it (undoable), without moving the caret.
 final class MarkdownTextView: NSTextView {
@@ -156,15 +161,50 @@ final class MarkdownTextView: NSTextView {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard window?.firstResponder === self else { return super.performKeyEquivalent(with: event) }
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
+        // Digits by key position: with ⇧ the character depends on the layout (⇧7 is "/" in German).
+        let digitKeys: [UInt16: Int] = [29: 0, 18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7, 28: 8]
+        if let digit = digitKeys[event.keyCode] {
+            switch (mods, digit) {
+            case ([.command], 0):
+                transformLines { LineEditing.settingPlain(lines: $0) }
+                return true
+            case ([.command], 1...6):
+                transformLines { LineEditing.settingHeading(digit, lines: $0) }
+                return true
+            case ([.command, .shift], 7):
+                transformLines { LineEditing.settingList(.numbered, lines: $0) }
+                return true
+            case ([.command, .shift], 8):
+                transformLines { LineEditing.settingList(.bullet, lines: $0) }
+                return true
+            default:
+                break
+            }
+        }
         switch (mods, event.charactersIgnoringModifiers?.lowercased()) {
         case ([.command], "b"):
-            wrapSelection(in: "**")
+            toggleWrap("**")
             return true
         case ([.command], "i"):
-            wrapSelection(in: "*")
+            toggleWrap("*")
+            return true
+        case ([.command, .shift], "s"):
+            toggleWrap("~~")
+            return true
+        case ([.command], "e"):
+            toggleWrap("`")
+            return true
+        case ([.command], "k"):
+            apply(InlineFormatting.link(in: string, selection: selectedRange()))
             return true
         case ([.command, .shift], "l"):
-            toggleChecklist()
+            transformLines { LineEditing.settingList(.checkbox, lines: $0) }
+            return true
+        case ([.command, .shift], "d"):
+            apply(LineEditing.duplicating(in: string, selection: selectedRange()))
+            return true
+        case ([.command, .shift], "k"):
+            apply(LineEditing.deleting(in: string, selection: selectedRange()))
             return true
         case ([.command], "x"):
             cut(nil)
@@ -194,22 +234,113 @@ final class MarkdownTextView: NSTextView {
         }
     }
 
-    private func wrapSelection(in marker: String) {
-        let selection = selectedRange()
-        let selected = (string as NSString).substring(with: selection)
-        let length = (marker as NSString).length
-        replace(selection, with: marker + selected + marker,
-                selecting: NSRange(location: selection.location + length, length: selection.length))
+    private func toggleWrap(_ marker: String) {
+        apply(InlineFormatting.toggling(marker, in: string, selection: selectedRange()))
     }
 
-    private func toggleChecklist() {
-        let range = currentLineRange
-        let raw = (string as NSString).substring(with: range)
-        let newline = raw.hasSuffix("\n") ? "\n" : ""
-        let line = String(raw.dropLast(newline.count))
-        let toggled = ListEditing.togglingCheckbox(line)
-        let lineLength = (toggled as NSString).length
-        replace(range, with: toggled + newline, selecting: NSRange(location: range.location + lineLength, length: 0))
+    private func transformLines(_ transform: ([String]) -> [String]) {
+        apply(LineEditing.transforming(string, selection: selectedRange(), transform))
+    }
+
+    private func apply(_ edit: (range: NSRange, replacement: String, selection: NSRange)) {
+        replace(edit.range, with: edit.replacement, selecting: edit.selection)
+        scrollRangeToVisible(edit.selection)
+    }
+
+    // MARK: - Context menu
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        // A copy: the text view may hand out the same menu every time, which must not grow.
+        let menu = (super.menu(for: event)?.copy() as? NSMenu) ?? NSMenu()
+        // Notes are plain Markdown: the system's Font submenu would do nothing.
+        for item in menu.items where item.submenu?.items.contains(where: {
+            $0.action == #selector(NSFontManager.orderFrontFontPanel(_:))
+        }) == true {
+            menu.removeItem(item)
+        }
+        let ours = markdownMenuItems()
+        for (index, item) in (ours + [.separator()]).enumerated() { menu.insertItem(item, at: index) }
+        return menu
+    }
+
+    private func markdownMenuItems() -> [NSMenuItem] {
+        let ns = string as NSString
+        let line = ns.substring(with: LineEditing.lineBlock(in: ns, selection: selectedRange())).components(separatedBy: "\n")[0]
+        let level = LineEditing.headingLevel(line).level
+        let list = ListEditing.parse(line).map(LineEditing.kind)
+        let quoted = line.hasPrefix(">")
+        let cmd: NSEvent.ModifierFlags = .command, shiftCmd: NSEvent.ModifierFlags = [.command, .shift]
+
+        let format = submenu("Format", [
+            item("Fett", "b", cmd) { $0.toggleWrap("**") },
+            item("Kursiv", "i", cmd) { $0.toggleWrap("*") },
+            item("Durchgestrichen", "s", shiftCmd) { $0.toggleWrap("~~") },
+            item("Code", "e", cmd) { $0.toggleWrap("`") },
+            .separator(),
+            item("Formatierung entfernen") { $0.apply(InlineFormatting.clearing(in: $0.string, selection: $0.selectedRange())) },
+        ])
+        var headings = (1...6).map { n in
+            item("Überschrift \(n)", "\(n)", cmd, on: level == n) { view in
+                view.transformLines { LineEditing.settingHeading(n, lines: $0) }
+            }
+        }
+        headings.append(item("Text", "0", cmd, on: level == 0 && list == nil && !quoted) { view in
+            view.transformLines { LineEditing.settingPlain(lines: $0) }
+        })
+        let paragraph = submenu("Absatz", [
+            item("Aufzählung", "8", shiftCmd, on: list == .bullet) { view in
+                view.transformLines { LineEditing.settingList(.bullet, lines: $0) }
+            },
+            item("Nummerierte Liste", "7", shiftCmd, on: list == .numbered) { view in
+                view.transformLines { LineEditing.settingList(.numbered, lines: $0) }
+            },
+            item("Checkliste", "l", shiftCmd, on: list == .checkbox) { view in
+                view.transformLines { LineEditing.settingList(.checkbox, lines: $0) }
+            },
+            .separator(),
+        ] + headings + [
+            .separator(),
+            item("Zitat", on: quoted) { view in view.transformLines { LineEditing.settingQuote(lines: $0) } },
+        ])
+        let insert = submenu("Einfügen", [
+            item("Trennlinie") { $0.apply(LineEditing.insertingRule(in: $0.string, selection: $0.selectedRange())) },
+        ])
+        let lines = submenu("Zeile", [
+            item("Nach oben", String(UnicodeScalar(NSUpArrowFunctionKey)!), .option) { $0.moveLines(up: true) },
+            item("Nach unten", String(UnicodeScalar(NSDownArrowFunctionKey)!), .option) { $0.moveLines(up: false) },
+            .separator(),
+            item("Duplizieren", "d", shiftCmd) { $0.apply(LineEditing.duplicating(in: $0.string, selection: $0.selectedRange())) },
+            item("Löschen", "k", shiftCmd) { $0.apply(LineEditing.deleting(in: $0.string, selection: $0.selectedRange())) },
+        ])
+        return [
+            item("Link hinzufügen", "k", cmd) { $0.apply(InlineFormatting.link(in: $0.string, selection: $0.selectedRange())) },
+            .separator(),
+            format, paragraph, insert, lines,
+        ]
+    }
+
+    /// A menu item running `action` on this view. The key equivalent is only shown: a context
+    /// menu is not asked for shortcuts, `performKeyEquivalent` handles them.
+    private func item(_ title: String, _ key: String = "", _ modifiers: NSEvent.ModifierFlags = [], on: Bool = false,
+                      _ action: @escaping (MarkdownTextView) -> Void) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(runMenuAction(_:)), keyEquivalent: key)
+        item.keyEquivalentModifierMask = modifiers
+        item.target = self
+        item.state = on ? .on : .off
+        item.representedObject = MenuAction(action)
+        return item
+    }
+
+    private func submenu(_ title: String, _ items: [NSMenuItem]) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        let menu = NSMenu(title: title)
+        items.forEach(menu.addItem)
+        item.submenu = menu
+        return item
+    }
+
+    @objc private func runMenuAction(_ sender: NSMenuItem) {
+        (sender.representedObject as? MenuAction)?.run(self)
     }
 
     /// An undoable replacement that goes through the normal change notifications.
@@ -219,4 +350,9 @@ final class MarkdownTextView: NSTextView {
         didChangeText()
         setSelectedRange(selection)
     }
+}
+
+private final class MenuAction: NSObject {
+    let run: (MarkdownTextView) -> Void
+    init(_ run: @escaping (MarkdownTextView) -> Void) { self.run = run }
 }

@@ -15,7 +15,7 @@ completely offline.
 - **Pin** a note to keep it above other windows (per note), optionally on all Spaces.
 - **Roll up** a note to its header with a double-click.
 - **Simple Markdown**, styled live with the syntax kept visible: headings, `- ` bullets,
-  numbered lists, `- [ ]` checkboxes (click to tick), quotes, `**bold**`, `*italic*`,
+  numbered lists, `- [ ]` checkboxes (click to tick), quotes, `---` rules (drawn as a line), `**bold**`, `*italic*`,
   `` `code` ``, `~~strike~~`, links and bare URLs.
 - **Plain files:** one Markdown file per note (default `~/Documents/Haftnotiz`, changeable from
   the menu bar, e.g. to a folder in your Obsidian vault). A small YAML front matter keeps the creation date and colour.
@@ -27,14 +27,22 @@ completely offline.
 
 ## Keyboard
 
+Line commands act on every line the selection touches. Everything is also in the context menu
+(Format, Paragraph, Insert, Line), with the shortcut next to it, plus clearing formatting, quotes
+and a horizontal rule.
+
 | Shortcut | Action |
 | --- | --- |
 | **⌘N** | New note |
 | **Return** in a list | Next item (an empty item ends the list) |
 | **Tab / ⇧Tab** in a list | Indent / outdent the item |
-| **⌥↑ / ⌥↓** | Move the line (or all selected lines) up / down |
-| **⇧⌘L** | Turn the line into a checkbox and back |
-| **⌘B / ⌘I** | Bold / italic |
+| **⌥↑ / ⌥↓** | Move the line up / down |
+| **⌘B / ⌘I / ⇧⌘S / ⌘E** | Bold / italic / strikethrough / code; pressed again, it removes the formatting |
+| **⌘K** | Link (a selected URL goes into the parentheses) |
+| **⌘1 … ⌘6 / ⌘0** | Heading of that level / plain text |
+| **⇧⌘8 / ⇧⌘7 / ⇧⌘L** | Bullet list / numbered list / checkboxes, and back |
+| **⇧⌘D** | Duplicate the line |
+| **⇧⌘K** | Delete the line |
 | **⌘F** | Find in the note |
 | **⌘W** | Close the note (an empty note goes away) |
 

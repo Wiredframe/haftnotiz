@@ -4,6 +4,8 @@ extension NSAttributedString.Key {
     /// Marks a `- [ ]` / `- [x]` range; the value is `true` when ticked. The characters are drawn
     /// invisible and `CheckboxLayoutManager` paints a circle over them.
     static let haftCheckbox = NSAttributedString.Key("de.wiredframe.haftnotiz.checkbox")
+    /// Marks a `---` line; its characters are invisible and `CheckboxLayoutManager` draws a line.
+    static let haftRule = NSAttributedString.Key("de.wiredframe.haftnotiz.rule")
 }
 
 /// Turns `MarkdownSyntax` spans into text attributes. The Markdown stays in the text (markers are
@@ -79,7 +81,7 @@ struct MarkdownStyler {
     private static func order(_ kind: MarkdownSyntax.Kind) -> Int {
         switch kind {
         case .heading: 0
-        case .quote, .done: 1
+        case .quote, .done, .rule: 1
         case .bold, .italic, .code, .strike: 2
         case .link: 3
         case .marker, .bullet: 4
@@ -109,6 +111,8 @@ struct MarkdownStyler {
         case .quote:
             storage.addAttribute(.foregroundColor, value: secondary, range: r)
             addTrait(.italicFontMask, in: r, storage)
+        case .rule:
+            storage.addAttributes([.foregroundColor: NSColor.clear, .haftRule: true], range: r)
         case .bold:
             addTrait(.boldFontMask, in: r, storage)
         case .italic:
@@ -133,15 +137,31 @@ struct MarkdownStyler {
     }
 }
 
-/// Draws checkbox circles over `.haftCheckbox` ranges (whose characters are invisible).
+/// Draws checkbox circles over `.haftCheckbox` ranges and lines over `.haftRule` ranges (whose
+/// characters are invisible).
 final class CheckboxLayoutManager: NSLayoutManager {
     var openColor: NSColor = .secondaryLabelColor
     var doneColor: NSColor = .controlAccentColor
+    var ruleColor: NSColor = .separatorColor
 
     override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin)
         guard let storage = textStorage, let container = textContainers.first else { return }
         let chars = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        storage.enumerateAttribute(.haftRule, in: chars) { value, range, _ in
+            guard value != nil else { return }
+            let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            let fragment = lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+            let used = lineFragmentUsedRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+            let inset = container.lineFragmentPadding
+            let y = (origin.y + used.midY).rounded(.down) + 0.5
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: origin.x + fragment.minX + inset, y: y))
+            path.line(to: NSPoint(x: origin.x + fragment.maxX - inset, y: y))
+            path.lineWidth = 1
+            ruleColor.setStroke()
+            path.stroke()
+        }
         storage.enumerateAttribute(.haftCheckbox, in: chars) { value, range, _ in
             guard let done = value as? Bool else { return }
             let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)

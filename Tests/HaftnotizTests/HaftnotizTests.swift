@@ -77,9 +77,9 @@ struct ListEditingTests {
 
     @Test("⇧⌘L toggles a checkbox")
     func toggle() {
-        #expect(ListEditing.togglingCheckbox("Milch") == "- [ ] Milch")
-        #expect(ListEditing.togglingCheckbox("  - Milch") == "  - [ ] Milch")
-        #expect(ListEditing.togglingCheckbox("- [x] Milch") == "- Milch")
+        #expect(LineEditing.settingList(.checkbox, lines: ["Milch"]) == ["- [ ] Milch"])
+        #expect(LineEditing.settingList(.checkbox, lines: ["  - Milch"]) == ["  - [ ] Milch"])
+        #expect(LineEditing.settingList(.checkbox, lines: ["- [x] Milch"]) == ["- Milch"])
     }
 }
 
@@ -345,6 +345,46 @@ struct EditorKeyTests {
         try pressReturn()
         #expect(view.string == "- [ ] Milch\n")
     }
+
+    @Test("⇧⌘7 works by key position, also where ⇧7 types \"/\"; ⇧⌘S strikes through")
+    func shortcutEvents() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        let view = makeView("eins")
+        window.contentView = view
+        window.makeFirstResponder(view)
+        func press(_ chars: String, _ keyCode: UInt16, _ mods: NSEvent.ModifierFlags) throws -> Bool {
+            let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: mods, timestamp: 0,
+                                                      windowNumber: window.windowNumber, context: nil, characters: chars,
+                                                      charactersIgnoringModifiers: chars, isARepeat: false, keyCode: keyCode))
+            return view.performKeyEquivalent(with: event)
+        }
+        #expect(try press("/", 26, [.command, .shift]))
+        #expect(view.string == "1. eins")
+        #expect(try press("0", 29, [.command]))
+        #expect(view.string == "eins")
+        view.setSelectedRange(NSRange(location: 0, length: 4))
+        #expect(try press("S", 1, [.command, .shift]))
+        #expect(view.string == "~~eins~~")
+    }
+
+    @Test("the context menu has the Markdown submenus once, however often it opens")
+    func contextMenu() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        let view = makeView("## Titel")
+        window.contentView = view
+        let event = try #require(NSEvent.mouseEvent(with: .rightMouseDown, location: NSPoint(x: 10, y: 290), modifierFlags: [],
+                                                    timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                                                    eventNumber: 0, clickCount: 1, pressure: 1))
+        let first = try #require(view.menu(for: event))
+        let second = try #require(view.menu(for: event))
+        for menu in [first, second] {
+            #expect(menu.items.filter { $0.title == "Absatz" }.count == 1)
+            #expect(!menu.items.contains { $0.title == "Font" || $0.title == "Schrift" })
+        }
+        let paragraph = try #require(second.items.first { $0.title == "Absatz" }?.submenu)
+        #expect(paragraph.items.first { $0.title == "Überschrift 2" }?.state == .on)
+        #expect(paragraph.items.first { $0.title == "Text" }?.state == .off)
+    }
 }
 
 @Suite("Hanging indent")
@@ -379,5 +419,158 @@ struct WindowResizeTests {
         }
         panel.close()
         #expect(panel.frame.width == 420)
+    }
+}
+
+@Suite("Inline formatting")
+struct InlineFormattingTests {
+    private func toggle(_ marker: String, _ text: String, _ selection: NSRange) -> (String, NSRange) {
+        let e = InlineFormatting.toggling(marker, in: text, selection: selection)
+        return ((text as NSString).replacingCharacters(in: e.range, with: e.replacement), e.selection)
+    }
+
+    @Test("wrapping keeps the word selected, a second press unwraps it")
+    func roundTrip() {
+        let wrapped = toggle("~~", "ein Wort", NSRange(location: 4, length: 4))
+        #expect(wrapped.0 == "ein ~~Wort~~")
+        #expect(wrapped.1 == NSRange(location: 6, length: 4))
+        let back = toggle("~~", wrapped.0, wrapped.1)
+        #expect(back.0 == "ein Wort")
+        #expect(back.1 == NSRange(location: 4, length: 4))
+    }
+
+    @Test("a selection including the markers is unwrapped")
+    func markersSelected() {
+        #expect(toggle("**", "**fett**", NSRange(location: 0, length: 8)).0 == "fett")
+        #expect(toggle("`", "`x`", NSRange(location: 0, length: 3)).0 == "x")
+    }
+
+    @Test("without a selection the caret lands between the markers; pressing again removes them")
+    func emptySelection() {
+        let once = toggle("**", "a ", NSRange(location: 2, length: 0))
+        #expect(once.0 == "a ****")
+        #expect(once.1 == NSRange(location: 4, length: 0))
+        #expect(toggle("**", once.0, once.1).0 == "a ")
+    }
+
+    @Test("italic and bold do not take each other's stars")
+    func boldItalic() {
+        #expect(toggle("*", "**x**", NSRange(location: 2, length: 1)).0 == "***x***")
+        #expect(toggle("*", "***x***", NSRange(location: 3, length: 1)).0 == "**x**")
+        #expect(toggle("**", "***x***", NSRange(location: 3, length: 1)).0 == "*x*")
+        #expect(toggle("**", "*x*", NSRange(location: 1, length: 1)).0 == "***x***")
+    }
+
+    @Test("⌘K builds a link around text or a URL")
+    func link() {
+        let text = InlineFormatting.link(in: "Seite", selection: NSRange(location: 0, length: 5))
+        #expect(text.replacement == "[Seite]()" && text.selection == NSRange(location: 8, length: 0))
+        let url = InlineFormatting.link(in: "https://a.de", selection: NSRange(location: 0, length: 12))
+        #expect(url.replacement == "[](https://a.de)" && url.selection == NSRange(location: 1, length: 0))
+    }
+}
+
+@Suite("Line commands")
+struct LineCommandTests {
+    private func run(_ e: LineEditing.Edit, on text: String) -> (String, NSRange) {
+        ((text as NSString).replacingCharacters(in: e.range, with: e.replacement), e.selection)
+    }
+
+    @Test("⌘1–⌘6 set the heading level, the same key or ⌘0 removes it")
+    func headings() {
+        #expect(LineEditing.settingHeading(2, lines: ["Titel"]) == ["## Titel"])
+        #expect(LineEditing.settingHeading(1, lines: ["### Titel"]) == ["# Titel"])
+        #expect(LineEditing.settingHeading(2, lines: ["## Titel"]) == ["Titel"])
+        #expect(LineEditing.settingHeading(0, lines: ["#### Titel"]) == ["Titel"])
+        #expect(LineEditing.settingPlain(lines: ["## a", "  - [x] b", "> c", "1. d"]) == ["a", "  b", "c", "d"])
+        #expect(LineEditing.settingList(.bullet, lines: ["## Titel"]) == ["- Titel"])
+        #expect(LineEditing.settingHeading(0, lines: ["#hashtag"]) == ["#hashtag"])
+    }
+
+    @Test("the caret keeps its place in the text when the prefix changes")
+    func caret() {
+        let text = "a\nTitel"
+        let e = LineEditing.transforming(text, selection: NSRange(location: 5, length: 0)) {
+            LineEditing.settingHeading(1, lines: $0)
+        }
+        let (result, selection) = run(e, on: text)
+        #expect(result == "a\n# Titel")
+        #expect(selection == NSRange(location: 7, length: 0))   // still after "Tit"
+    }
+
+    @Test("lists over several lines: numbered from 1, blank lines left alone, again removes")
+    func lists() {
+        let numbered = LineEditing.settingList(.numbered, lines: ["eins", "", "- zwei"])
+        #expect(numbered == ["1. eins", "", "2. zwei"])
+        #expect(LineEditing.settingList(.numbered, lines: numbered) == ["eins", "", "zwei"])
+        #expect(LineEditing.settingList(.bullet, lines: ["1. a", "  b"]) == ["- a", "  - b"])
+        #expect(LineEditing.settingList(.bullet, lines: ["- a", "- b"]) == ["a", "b"])
+        #expect(LineEditing.settingList(.checkbox, lines: ["- [x] a", "b"]) == ["- [x] a", "- [ ] b"])
+    }
+
+    @Test("⇧⌘D copies the lines below and selects the copy")
+    func duplicate() {
+        let text = "eins\nzwei\ndrei"
+        #expect(run(LineEditing.duplicating(in: text, selection: NSRange(location: 6, length: 0)), on: text)
+            == ("eins\nzwei\nzwei\ndrei", NSRange(location: 11, length: 0)))
+        #expect(run(LineEditing.duplicating(in: text, selection: NSRange(location: 12, length: 0)), on: text).0
+            == "eins\nzwei\ndrei\ndrei")
+        #expect(run(LineEditing.duplicating(in: text, selection: NSRange(location: 0, length: 10)), on: text).0
+            == "eins\nzwei\neins\nzwei\ndrei")
+    }
+
+    @Test("⇧⌘K removes the lines, also the last one")
+    func delete() {
+        let text = "eins\nzwei\ndrei"
+        #expect(run(LineEditing.deleting(in: text, selection: NSRange(location: 6, length: 0)), on: text)
+            == ("eins\ndrei", NSRange(location: 5, length: 0)))
+        #expect(run(LineEditing.deleting(in: text, selection: NSRange(location: 12, length: 0)), on: text)
+            == ("eins\nzwei", NSRange(location: 9, length: 0)))
+        #expect(run(LineEditing.deleting(in: "nur", selection: NSRange(location: 1, length: 0)), on: "nur").0 == "")
+    }
+}
+
+@Suite("Context menu commands")
+struct ContextMenuCommandTests {
+    private func run(_ e: (range: NSRange, replacement: String, selection: NSRange), on text: String) -> (String, NSRange) {
+        ((text as NSString).replacingCharacters(in: e.range, with: e.replacement), e.selection)
+    }
+
+    @Test("---, *** and ___ alone on a line are rules; a bullet or text with dashes is not")
+    func rules() {
+        for line in ["---", "***", "___", "- - -", "-----", "  ---  "] {
+            #expect(MarkdownSyntax.spans(in: line).map(\.kind) == [.rule], "\(line)")
+        }
+        for line in ["--", "- a", "--- x", "**x**"] {
+            #expect(!MarkdownSyntax.spans(in: line).map(\.kind).contains(.rule), "\(line)")
+        }
+    }
+
+    @Test("a rule replaces an empty line, below text it gets a blank line first")
+    func insertRule() {
+        #expect(run(LineEditing.insertingRule(in: "", selection: NSRange(location: 0, length: 0)), on: "")
+            == ("---\n", NSRange(location: 4, length: 0)))
+        #expect(run(LineEditing.insertingRule(in: "Text", selection: NSRange(location: 2, length: 0)), on: "Text")
+            == ("Text\n\n---\n", NSRange(location: 10, length: 0)))
+        #expect(run(LineEditing.insertingRule(in: "a\nb", selection: NSRange(location: 0, length: 0)), on: "a\nb")
+            == ("a\n\n---\nb", NSRange(location: 7, length: 0)))
+    }
+
+    @Test("quotes on and off")
+    func quotes() {
+        #expect(LineEditing.settingQuote(lines: ["a", "", "b"]) == ["> a", "", "> b"])
+        #expect(LineEditing.settingQuote(lines: ["> a", ">b"]) == ["a", "b"])
+    }
+
+    @Test("clearing formatting removes all inline markers, also around the selection")
+    func clear() {
+        let text = "ein **fettes** und ~~altes~~ *Wort* mit `code`"
+        #expect(run(InlineFormatting.clearing(in: text, selection: NSRange(location: 0, length: 0)), on: text).0
+            == "ein fettes und altes Wort mit code")
+        let nested = "x ***y*** z"
+        #expect(run(InlineFormatting.clearing(in: nested, selection: NSRange(location: 5, length: 1)), on: nested)
+            == ("x y z", NSRange(location: 2, length: 1)))
+        #expect(run(InlineFormatting.clearing(in: "snake_case_name", selection: NSRange(location: 0, length: 0)),
+                    on: "snake_case_name").0 == "snake_case_name")
     }
 }

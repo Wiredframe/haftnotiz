@@ -4,7 +4,7 @@ import Foundation
 /// paragraphs that changed. Ranges are UTF-16 offsets into the line (`NSString` semantics).
 ///
 /// Supported, on purpose no more: headings, bullets and numbered lists, checkboxes, quotes,
-/// **bold**, *italic*, `code`, ~~strike~~, [links](url) and bare URLs.
+/// horizontal rules, **bold**, *italic*, `code`, ~~strike~~, [links](url) and bare URLs.
 enum MarkdownSyntax {
     enum Kind: Equatable {
         case heading(Int)
@@ -16,6 +16,8 @@ enum MarkdownSyntax {
         /// The text of a ticked checkbox line.
         case done
         case quote
+        /// `---`, `***` or `___` alone on a line, drawn as a line by the editor.
+        case rule
         case bold
         case italic
         case code
@@ -33,7 +35,10 @@ enum MarkdownSyntax {
         let whole = NSRange(location: 0, length: ns.length)
         var spans: [Span] = []
 
-        // Block prefix: at most one per line.
+        // Block prefix: at most one per line. A rule is the whole line, nothing inline in it.
+        if rule.firstMatch(in: line, range: whole) != nil {
+            return [Span(range: whole, kind: .rule)]
+        }
         if let m = heading.firstMatch(in: line, range: whole) {
             spans.append(Span(range: whole, kind: .heading(m.range(at: 1).length)))
             spans.append(Span(range: m.range, kind: .marker))
@@ -94,6 +99,7 @@ enum MarkdownSyntax {
     private nonisolated(unsafe) static let heading = regex(#"^(#{1,6})[ \t]+"#)
     private nonisolated(unsafe) static let checkbox = regex(#"^([ \t]*)([-*+] \[([ xX])\])(?=[ \t]|$)"#)
     private nonisolated(unsafe) static let bullet = regex(#"^([ \t]*)([-*+]|\d+[.)])(?=[ \t])"#)
+    private nonisolated(unsafe) static let rule = regex(#"^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$"#)
     private nonisolated(unsafe) static let quote = regex(#"^[ \t]*(>)"#)
     private nonisolated(unsafe) static let code = regex(#"`[^`\n]+`"#)
     private nonisolated(unsafe) static let bold = regex(#"(\*\*|__)(?=\S)(.+?)(?<=\S)\1"#)
@@ -103,7 +109,7 @@ enum MarkdownSyntax {
     private nonisolated(unsafe) static let bareURL = regex(#"https?://[^\s<>()\[\]]+[^\s<>()\[\].,;:!?'"]"#)
 }
 
-/// What Return, Tab and ⇧⌘L do on a list line. Pure, so it is easy to test.
+/// What Return and Tab do on a list line, and ⌥↑ / ⌥↓. Pure, so it is easy to test.
 enum ListEditing {
     struct ListLine: Equatable {
         let indent: String
@@ -191,13 +197,235 @@ enum ListEditing {
         return (range, replacement, NSRange(location: selection.location + shift, length: selection.length))
     }
 
-    /// ⇧⌘L: a checkbox line loses its box (keeping a bullet), anything else becomes a checkbox.
-    static func togglingCheckbox(_ line: String) -> String {
-        if let item = parse(line) {
-            if item.isCheckbox { return item.indent + "- " + item.body }
-            return item.indent + "- [ ] " + item.body
+}
+
+/// What ⌘B, ⌘I, ⇧⌘S, ⌘E and ⌘K do with the selection. Pure, so it is easy to test.
+enum InlineFormatting {
+    typealias Edit = (range: NSRange, replacement: String, selection: NSRange)
+
+    /// Wraps the selection in `marker`, or unwraps it when it is already wrapped (markers just
+    /// outside the selection or at its own edges). `*` only counts as wrapped in odd runs, so
+    /// ⌘I inside `**bold**` adds italics instead of breaking the bold, and the other way round.
+    static func toggling(_ marker: String, in text: String, selection: NSRange) -> Edit {
+        let ns = text as NSString
+        let m = (marker as NSString).length
+        let unit = (marker as NSString).character(at: 0)
+        func canUnwrap(_ run: Int) -> Bool { run >= m && (m != 1 || run % 2 == 1) }
+        func run(from start: Int, step: Int, limit: Int) -> Int {
+            var i = start, n = 0
+            while i != limit, ns.character(at: i) == unit { n += 1; i += step }
+            return n
         }
-        let indent = String(line.prefix { $0 == " " || $0 == "\t" })
-        return indent + "- [ ] " + line.dropFirst(indent.count)
+
+        // Markers around the selection.
+        let before = run(from: selection.location - 1, step: -1, limit: -1)
+        let after = run(from: selection.upperBound, step: 1, limit: ns.length)
+        if canUnwrap(min(before, after)) {
+            let outer = NSRange(location: selection.location - m, length: selection.length + 2 * m)
+            return (outer, ns.substring(with: selection), NSRange(location: outer.location, length: selection.length))
+        }
+        // Markers inside the selection, at its edges.
+        if selection.length >= 2 * m {
+            let lead = run(from: selection.location, step: 1, limit: selection.upperBound)
+            let trail = run(from: selection.upperBound - 1, step: -1, limit: selection.location - 1)
+            if lead < selection.length, canUnwrap(min(lead, trail)) {
+                let inner = ns.substring(with: NSRange(location: selection.location + m, length: selection.length - 2 * m))
+                return (selection, inner, NSRange(location: selection.location, length: selection.length - 2 * m))
+            }
+        }
+        let selected = ns.substring(with: selection)
+        return (selection, marker + selected + marker, NSRange(location: selection.location + m, length: selection.length))
+    }
+
+    private nonisolated(unsafe) static let clearPatterns: [(NSRegularExpression, String)] = [
+        (#"`([^`\n]+)`"#, "$1"),
+        (#"(\*\*|__)(?=\S)(.+?)(?<=\S)\1"#, "$2"),
+        (#"~~(?=\S)(.+?)(?<=\S)~~"#, "$1"),
+        (#"==(?=\S)(.+?)(?<=\S)=="#, "$1"),
+        (#"(?<![*\w])\*(?![\s*])(.+?)(?<![\s*])\*(?![*\w])|(?<![_\w])_(?![\s_])(.+?)(?<![\s_])_(?![_\w])"#, "$1$2"),
+    ].map { (try! NSRegularExpression(pattern: $0.0), $0.1) }
+
+    /// Removes bold, italic, strikethrough, highlight and code markers from the selection (or the
+    /// whole line without one), including markers right around the selection.
+    static func clearing(in text: String, selection: NSRange) -> Edit {
+        let ns = text as NSString
+        var range = selection.length > 0 ? selection : LineEditing.lineBlock(in: ns, selection: selection)
+        let markers = Set("*_~`=".utf16)
+        while range.location > 0, range.upperBound < ns.length,
+              markers.contains(ns.character(at: range.location - 1)), markers.contains(ns.character(at: range.upperBound)) {
+            range = NSRange(location: range.location - 1, length: range.length + 2)
+        }
+        var result = ns.substring(with: range)
+        var changed = true
+        while changed {   // nested formatting (`***x***`) needs more than one pass
+            changed = false
+            for (regex, template) in clearPatterns {
+                let all = NSRange(location: 0, length: (result as NSString).length)
+                let next = regex.stringByReplacingMatches(in: result, range: all, withTemplate: template)
+                if next != result { result = next; changed = true }
+            }
+        }
+        let length = (result as NSString).length
+        let newSelection = selection.length > 0
+            ? NSRange(location: range.location, length: length)
+            : NSRange(location: range.location + length, length: 0)
+        return (range, result, newSelection)
+    }
+
+    /// `[selection]()` with the caret between the parentheses; a selected URL becomes `[](url)`
+    /// with the caret in the brackets.
+    static func link(in text: String, selection: NSRange) -> Edit {
+        let selected = (text as NSString).substring(with: selection)
+        if selected.hasPrefix("http://") || selected.hasPrefix("https://") {
+            return (selection, "[](\(selected))", NSRange(location: selection.location + 1, length: 0))
+        }
+        let caret = selection.location + selection.length + 3
+        return (selection, "[\(selected)]()", NSRange(location: caret, length: 0))
+    }
+}
+
+/// Commands on whole lines: headings (⌘0–⌘6), lists (⇧⌘7, ⇧⌘8, ⇧⌘L), duplicate (⇧⌘D) and
+/// delete (⇧⌘K). They act on every line the selection touches. Pure, so it is easy to test.
+enum LineEditing {
+    typealias Edit = (range: NSRange, replacement: String, selection: NSRange)
+
+    /// The lines touched by `selection`, without the trailing newline; a selection ending right
+    /// after a newline does not include the next line.
+    static func lineBlock(in ns: NSString, selection: NSRange) -> NSRange {
+        var span = selection
+        if span.length > 0, ns.character(at: span.upperBound - 1) == 0x0A { span.length -= 1 }
+        var block = ns.lineRange(for: span)
+        if block.length > 0, ns.character(at: block.upperBound - 1) == 0x0A { block.length -= 1 }
+        return block
+    }
+
+    /// Replaces the touched lines with `transform(lines)`; the caret or selection keeps its place
+    /// in the text (shifted by what changed in front of it).
+    static func transforming(_ text: String, selection: NSRange, _ transform: ([String]) -> [String]) -> Edit {
+        let ns = text as NSString
+        let block = lineBlock(in: ns, selection: selection)
+        let lines = ns.substring(with: block).components(separatedBy: "\n")
+        let new = transform(lines)
+        let replacement = new.joined(separator: "\n")
+        let firstDelta = (new[0] as NSString).length - (lines[0] as NSString).length
+        let totalDelta = (replacement as NSString).length - block.length
+        let start = max(block.location, selection.location + firstDelta)
+        let end = max(start, selection.upperBound + totalDelta)
+        return (block, replacement, NSRange(location: start, length: end - start))
+    }
+
+    // MARK: Headings
+
+    static func headingLevel(_ line: String) -> (level: Int, prefixLength: Int) {
+        let hashes = line.prefix { $0 == "#" }.count
+        guard (1...6).contains(hashes) else { return (0, 0) }
+        let rest = line.dropFirst(hashes)
+        guard let first = rest.first, first == " " || first == "\t" else { return (0, 0) }
+        return (hashes, hashes + rest.prefix { $0 == " " || $0 == "\t" }.count)
+    }
+
+    /// ⌘1–⌘6 make the lines headings of that level, pressed again (or ⌘0) plain text.
+    static func settingHeading(_ level: Int, lines: [String]) -> [String] {
+        let removing = level == 0 || lines.allSatisfy { $0.isEmpty || headingLevel($0).level == level }
+        return lines.map { line in
+            let body = String(line.dropFirst(headingLevel(line).prefixLength))
+            if removing || (line.isEmpty && lines.count > 1) { return body }
+            return String(repeating: "#", count: level) + " " + body
+        }
+    }
+
+    /// ⌘0: plain text, without heading, list marker or quote (indentation stays).
+    static func settingPlain(lines: [String]) -> [String] {
+        lines.map { line in
+            var body = String(line.dropFirst(headingLevel(line).prefixLength))
+            if body.hasPrefix(">") { body = body.hasPrefix("> ") ? String(body.dropFirst(2)) : String(body.dropFirst()) }
+            if let item = ListEditing.parse(body) { body = item.indent + item.body }
+            return body
+        }
+    }
+
+    // MARK: Lists
+
+    enum ListKind { case bullet, numbered, checkbox }
+
+    static func kind(of item: ListEditing.ListLine) -> ListKind {
+        if item.isCheckbox { return .checkbox }
+        return item.marker.first?.isNumber == true ? .numbered : .bullet
+    }
+
+    /// ⇧⌘8 / ⇧⌘7 / ⇧⌘L: turns the lines into that kind of list, numbered from 1; if they already
+    /// all are, back into plain text (a checkbox keeps its bullet, as before). Blank lines in a
+    /// longer selection stay blank.
+    static func settingList(_ target: ListKind, lines: [String]) -> [String] {
+        let content = lines.count > 1 ? lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty } : lines
+        let removing = !content.isEmpty && content.allSatisfy { ListEditing.parse($0).map(kind) == target }
+        var number = 0
+        return lines.map { line in
+            if lines.count > 1, line.trimmingCharacters(in: .whitespaces).isEmpty { return line }
+            let line = String(line.dropFirst(headingLevel(line).prefixLength))   // a heading becomes the item's text
+            let item = ListEditing.parse(line)
+            let indent = item?.indent ?? String(line.prefix { $0 == " " || $0 == "\t" })
+            let body = item?.body ?? String(line.dropFirst(indent.count))
+            if removing { return target == .checkbox ? indent + "- " + body : indent + body }
+            number += 1
+            switch target {
+            case .bullet: return indent + "- " + body
+            case .numbered: return indent + "\(number). " + body
+            case .checkbox: return indent + (item?.isCheckbox == true ? item!.marker : "- [ ] ") + body
+            }
+        }
+    }
+
+    // MARK: Quote and rule
+
+    /// Quotes the lines with `> `, or unquotes them when they all are.
+    static func settingQuote(lines: [String]) -> [String] {
+        let content = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        let removing = !content.isEmpty && content.allSatisfy { $0.hasPrefix(">") }
+        return lines.map { line in
+            if removing { return line.hasPrefix("> ") ? String(line.dropFirst(2)) : String(line.drop { $0 == ">" }) }
+            if lines.count > 1, line.trimmingCharacters(in: .whitespaces).isEmpty { return line }
+            return "> " + line
+        }
+    }
+
+    /// A horizontal rule: an empty line becomes `---`, otherwise it goes below the lines after a
+    /// blank line (right below text, `---` would turn that text into a heading). The caret goes
+    /// to the line after the rule.
+    static func insertingRule(in text: String, selection: NSRange) -> Edit {
+        let ns = text as NSString
+        let block = lineBlock(in: ns, selection: selection)
+        let atEnd = block.upperBound == ns.length
+        let blank = ns.substring(with: block).trimmingCharacters(in: .whitespaces).isEmpty
+        let range = blank ? block : NSRange(location: block.upperBound, length: 0)
+        let inserted = (blank ? "" : "\n\n") + "---" + (atEnd ? "\n" : "")
+        let caret = range.location + (inserted as NSString).length + (atEnd ? 0 : 1)
+        return (range, inserted, NSRange(location: caret, length: 0))
+    }
+
+    // MARK: Duplicate and delete
+
+    /// ⇧⌘D: copies the lines below themselves and moves the selection onto the copy.
+    static func duplicating(in text: String, selection: NSRange) -> Edit {
+        let ns = text as NSString
+        let block = lineBlock(in: ns, selection: selection)
+        let inserted = "\n" + ns.substring(with: block)
+        let shift = (inserted as NSString).length
+        return (NSRange(location: block.upperBound, length: 0), inserted,
+                NSRange(location: selection.location + shift, length: selection.length))
+    }
+
+    /// ⇧⌘K: removes the lines; the caret goes to the start of the line that follows (or, for the
+    /// last line, the end of the one before).
+    static func deleting(in text: String, selection: NSRange) -> Edit {
+        let ns = text as NSString
+        let block = lineBlock(in: ns, selection: selection)
+        if block.upperBound < ns.length {
+            let range = NSRange(location: block.location, length: block.length + 1)
+            return (range, "", NSRange(location: block.location, length: 0))
+        }
+        let start = max(0, block.location - 1)
+        let range = NSRange(location: start, length: block.upperBound - start)
+        return (range, "", NSRange(location: start, length: 0))
     }
 }
