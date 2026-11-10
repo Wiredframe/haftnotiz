@@ -10,7 +10,7 @@ import AppKit
 /// - On every selected line: ⌘1–⌘6 heading, ⌘0 plain text (no heading, list or quote), ⇧⌘8 / ⇧⌘7 / ⇧⌘L bullet, numbered
 ///   or checkbox list and back, ⇧⌘D duplicate, ⇧⌘K delete.
 /// - The context menu offers all of this (with the shortcuts, for those who forget them), plus
-///   clearing formatting, quotes and a horizontal rule.
+///   clearing formatting and quotes.
 /// - The standard editing shortcuts are handled here too, so they work without an Edit menu.
 /// - A click on a checkbox circle ticks it (undoable), without moving the caret.
 final class MarkdownTextView: NSTextView {
@@ -252,15 +252,59 @@ final class MarkdownTextView: NSTextView {
     override func menu(for event: NSEvent) -> NSMenu? {
         // A copy: the text view may hand out the same menu every time, which must not grow.
         let menu = (super.menu(for: event)?.copy() as? NSMenu) ?? NSMenu()
-        // Notes are plain Markdown: the system's Font submenu would do nothing.
-        for item in menu.items where item.submenu?.items.contains(where: {
-            $0.action == #selector(NSFontManager.orderFrontFontPanel(_:))
-        }) == true {
-            menu.removeItem(item)
-        }
+        Self.trimSystemItems(of: menu)
         let ours = markdownMenuItems()
         for (index, item) in (ours + [.separator()]).enumerated() { menu.insertItem(item, at: index) }
         return menu
+    }
+
+    /// AppKit adds AutoFill only when the menu opens, so it is trimmed again here.
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+        Self.trimSystemItems(of: menu)
+    }
+
+    /// The system part of the menu is long. Kept: Look Up, Search with Google, Cut/Copy/Paste,
+    /// Share, Show Writing Tools (grouped with Share), Spelling and Grammar, Services. Removed:
+    /// Translate, Proofread and Rewrite (both are in Writing Tools), Font (does nothing in plain
+    /// Markdown), Substitutions, Transformations, Speech, AutoFill. Matched by action and
+    /// identifier, not by the localized titles.
+    static func trimSystemItems(of menu: NSMenu) {
+        func actions(_ item: NSMenuItem) -> [String] {
+            ([item] + (item.submenu?.items ?? [])).compactMap { $0.action.map(NSStringFromSelector) }
+        }
+        var seenLookUp = false, seenWritingTools = false
+        for item in menu.items {
+            let id = item.identifier?.rawValue ?? ""
+            let acts = actions(item)
+            var remove = id.hasSuffix("Substitutions") || id.hasSuffix("Transformations")
+                || acts.contains("orderFrontFontPanel:") || acts.contains("startSpeaking:")
+                || (id + acts.joined()).range(of: "autofill", options: .caseInsensitive) != nil
+            if item.action.map(NSStringFromSelector) == "_rvMenuItemAction" {
+                remove = seenLookUp   // the first is Look Up, the next ones Translate
+                seenLookUp = true
+            }
+            if item.action.map(NSStringFromSelector) == "showWritingTools:" {
+                remove = seenWritingTools   // keep "Show Writing Tools", drop Proofread and Rewrite
+                seenWritingTools = true
+            }
+            if remove { menu.removeItem(item) }
+        }
+        // Share and Writing Tools in one group.
+        let items = menu.items
+        for (index, item) in items.enumerated() where item.isSeparatorItem && index > 0 && index + 1 < items.count {
+            if items[index - 1].action.map(NSStringFromSelector) == "_performStandardShareMenuItem:",
+               items[index + 1].action.map(NSStringFromSelector) == "showWritingTools:" {
+                menu.removeItem(item)
+            }
+        }
+        // No separators at the ends or next to each other.
+        var previousWasSeparator = true
+        for item in menu.items {
+            if item.isSeparatorItem && previousWasSeparator { menu.removeItem(item); continue }
+            previousWasSeparator = item.isSeparatorItem
+        }
+        if let last = menu.items.last, last.isSeparatorItem { menu.removeItem(last) }
     }
 
     private func markdownMenuItems() -> [NSMenuItem] {
@@ -302,9 +346,6 @@ final class MarkdownTextView: NSTextView {
             .separator(),
             item("Zitat", on: quoted) { view in view.transformLines { LineEditing.settingQuote(lines: $0) } },
         ])
-        let insert = submenu("Einfügen", [
-            item("Trennlinie") { $0.apply(LineEditing.insertingRule(in: $0.string, selection: $0.selectedRange())) },
-        ])
         let lines = submenu("Zeile", [
             item("Nach oben", String(UnicodeScalar(NSUpArrowFunctionKey)!), .option) { $0.moveLines(up: true) },
             item("Nach unten", String(UnicodeScalar(NSDownArrowFunctionKey)!), .option) { $0.moveLines(up: false) },
@@ -315,7 +356,7 @@ final class MarkdownTextView: NSTextView {
         return [
             item("Link hinzufügen", "k", cmd) { $0.apply(InlineFormatting.link(in: $0.string, selection: $0.selectedRange())) },
             .separator(),
-            format, paragraph, insert, lines,
+            format, paragraph, lines,
         ]
     }
 

@@ -28,8 +28,7 @@ completely offline.
 ## Keyboard
 
 Line commands act on every line the selection touches. Everything is also in the context menu
-(Format, Paragraph, Insert, Line), with the shortcut next to it, plus clearing formatting, quotes
-and a horizontal rule.
+(Format, Paragraph, Line), with the shortcut next to it, plus clearing formatting and quotes.
 
 | Shortcut | Action |
 | --- | --- |

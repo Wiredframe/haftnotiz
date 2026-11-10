@@ -57,6 +57,11 @@ private struct MenuBarContent: View {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var keyMonitor: Any?
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // No "AutoFill" (contacts, passwords) in the notes' context menu.
+        UserDefaults.standard.register(defaults: ["NSAutoFillSystemInsertMenuEnabled": false])
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Only one Haftnotiz at a time (e.g. a second copy of the app): two would edit the same files.
         if let bundleID = Bundle.main.bundleIdentifier,

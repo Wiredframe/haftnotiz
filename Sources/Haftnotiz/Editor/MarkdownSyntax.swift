@@ -206,7 +206,53 @@ enum InlineFormatting {
     /// Wraps the selection in `marker`, or unwraps it when it is already wrapped (markers just
     /// outside the selection or at its own edges). `*` only counts as wrapped in odd runs, so
     /// ⌘I inside `**bold**` adds italics instead of breaking the bold, and the other way round.
+    ///
+    /// The markers go around the text of each selected line, never around a block prefix
+    /// (`- [ ] `, `# `, `> `, list markers), the line break or surrounding spaces, so a
+    /// triple-clicked list item stays a list item. Over several lines: if every line is already
+    /// wrapped, all are unwrapped, otherwise the lines that are not get wrapped.
     static func toggling(_ marker: String, in text: String, selection: NSRange) -> Edit {
+        guard selection.length > 0 else { return togglingSegment(marker, in: text, selection: selection) }
+        let segments = contentSegments(in: text, selection: selection)
+        if segments.isEmpty { return togglingSegment(marker, in: text, selection: selection) }
+        if segments.count == 1 { return togglingSegment(marker, in: text, selection: segments[0]) }
+
+        let edits = segments.map { togglingSegment(marker, in: text, selection: $0) }
+        func unwraps(_ e: Edit) -> Bool { (e.replacement as NSString).length < e.range.length }
+        let chosen = edits.allSatisfy(unwraps) ? edits : edits.filter { !unwraps($0) }
+        let ns = text as NSString
+        let span = NSRange(location: chosen[0].range.location,
+                           length: chosen[chosen.count - 1].range.upperBound - chosen[0].range.location)
+        let result = NSMutableString(string: ns.substring(with: span))
+        for e in chosen.reversed() {
+            result.replaceCharacters(in: NSRange(location: e.range.location - span.location, length: e.range.length),
+                                     with: e.replacement)
+        }
+        let delta = chosen.dropLast().reduce(0) { $0 + ($1.replacement as NSString).length - $1.range.length }
+        let start = chosen[0].selection.location
+        let end = chosen[chosen.count - 1].selection.upperBound + delta
+        return (span, result as String, NSRange(location: start, length: end - start))
+    }
+
+    /// The selected part of each line's text: without block prefix, line break and outer spaces.
+    static func contentSegments(in text: String, selection: NSRange) -> [NSRange] {
+        let ns = text as NSString
+        let block = LineEditing.lineBlock(in: ns, selection: selection)
+        var segments: [NSRange] = []
+        ns.enumerateSubstrings(in: block, options: [.byLines]) { line, lineRange, _, _ in
+            guard let line else { return }
+            let contentStart = lineRange.location + LineEditing.blockPrefixLength(line)
+            let lower = max(contentStart, selection.location)
+            var upper = min(lineRange.upperBound, selection.upperBound)
+            var start = lower
+            while start < upper, ns.character(at: start) == 0x20 || ns.character(at: start) == 0x09 { start += 1 }
+            while upper > start, ns.character(at: upper - 1) == 0x20 || ns.character(at: upper - 1) == 0x09 { upper -= 1 }
+            if upper > start { segments.append(NSRange(location: start, length: upper - start)) }
+        }
+        return segments
+    }
+
+    private static func togglingSegment(_ marker: String, in text: String, selection: NSRange) -> Edit {
         let ns = text as NSString
         let m = (marker as NSString).length
         let unit = (marker as NSString).character(at: 0)
@@ -334,6 +380,24 @@ enum LineEditing {
         }
     }
 
+    /// How long a line's block prefix is: heading `## `, quote `> `, then indent and list marker
+    /// (`- `, `1. `, `- [ ] `).
+    static func blockPrefixLength(_ line: String) -> Int {
+        let heading = headingLevel(line).prefixLength
+        if heading > 0 { return heading }
+        var length = 0
+        var rest = Substring(line)
+        if rest.hasPrefix(">") {
+            let quote = rest.hasPrefix("> ") ? 2 : 1
+            length += quote
+            rest = rest.dropFirst(quote)
+        }
+        if let item = ListEditing.parse(String(rest)) {
+            length += (item.indent + item.marker as NSString).length
+        }
+        return length
+    }
+
     /// ⌘0: plain text, without heading, list marker or quote (indentation stays).
     static func settingPlain(lines: [String]) -> [String] {
         lines.map { line in
@@ -376,7 +440,7 @@ enum LineEditing {
         }
     }
 
-    // MARK: Quote and rule
+    // MARK: Quote
 
     /// Quotes the lines with `> `, or unquotes them when they all are.
     static func settingQuote(lines: [String]) -> [String] {
@@ -387,20 +451,6 @@ enum LineEditing {
             if lines.count > 1, line.trimmingCharacters(in: .whitespaces).isEmpty { return line }
             return "> " + line
         }
-    }
-
-    /// A horizontal rule: an empty line becomes `---`, otherwise it goes below the lines after a
-    /// blank line (right below text, `---` would turn that text into a heading). The caret goes
-    /// to the line after the rule.
-    static func insertingRule(in text: String, selection: NSRange) -> Edit {
-        let ns = text as NSString
-        let block = lineBlock(in: ns, selection: selection)
-        let atEnd = block.upperBound == ns.length
-        let blank = ns.substring(with: block).trimmingCharacters(in: .whitespaces).isEmpty
-        let range = blank ? block : NSRange(location: block.upperBound, length: 0)
-        let inserted = (blank ? "" : "\n\n") + "---" + (atEnd ? "\n" : "")
-        let caret = range.location + (inserted as NSString).length + (atEnd ? 0 : 1)
-        return (range, inserted, NSRange(location: caret, length: 0))
     }
 
     // MARK: Duplicate and delete

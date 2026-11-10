@@ -380,6 +380,14 @@ struct EditorKeyTests {
         for menu in [first, second] {
             #expect(menu.items.filter { $0.title == "Absatz" }.count == 1)
             #expect(!menu.items.contains { $0.title == "Font" || $0.title == "Schrift" })
+            let ids = menu.items.compactMap(\.identifier?.rawValue)
+            #expect(!ids.contains { $0.hasSuffix("Substitutions") || $0.hasSuffix("Transformations") })
+            #expect(ids.contains { $0.hasSuffix("SpellingAndGrammar") })
+            #expect(!menu.items.contains { $0.submenu?.items.contains { $0.action == #selector(NSTextView.startSpeaking(_:)) } == true })
+            #expect(menu.items.filter { $0.action.map(NSStringFromSelector) == "_rvMenuItemAction" }.count <= 1)
+            #expect(menu.items.filter { $0.action.map(NSStringFromSelector) == "showWritingTools:" }.count <= 1)
+            #expect(!menu.items.contains { $0.title == "Einfügen" })
+            #expect(zip(menu.items, menu.items.dropFirst()).allSatisfy { !($0.isSeparatorItem && $1.isSeparatorItem) })
         }
         let paragraph = try #require(second.items.first { $0.title == "Absatz" }?.submenu)
         #expect(paragraph.items.first { $0.title == "Überschrift 2" }?.state == .on)
@@ -437,6 +445,31 @@ struct InlineFormattingTests {
         let back = toggle("~~", wrapped.0, wrapped.1)
         #expect(back.0 == "ein Wort")
         #expect(back.1 == NSRange(location: 4, length: 4))
+    }
+
+    @Test("a triple-clicked list item: the markers go around its text, not the box or the line break")
+    func tripleClick() {
+        let text = "- [ ] Erstens\n- [ ] Zweitens"
+        let once = toggle("~~", text, NSRange(location: 0, length: 14))   // line 1 with its "\n"
+        #expect(once.0 == "- [ ] ~~Erstens~~\n- [ ] Zweitens")
+        #expect(once.1 == NSRange(location: 8, length: 7))
+        #expect(toggle("~~", once.0, NSRange(location: 0, length: 18)).0 == text)   // triple-click again
+    }
+
+    @Test("over several lines each line gets its own markers; all wrapped, all unwrapped")
+    func severalLines() {
+        let text = "# Titel\n- eins \n\n> zwei"
+        let all = NSRange(location: 0, length: (text as NSString).length)
+        let wrapped = toggle("**", text, all)
+        #expect(wrapped.0 == "# **Titel**\n- **eins** \n\n> **zwei**")
+        #expect(toggle("**", wrapped.0, NSRange(location: 0, length: (wrapped.0 as NSString).length)).0 == text)
+        // mixed: only the plain line is wrapped
+        #expect(toggle("~~", "~~a~~\nb", NSRange(location: 0, length: 7)).0 == "~~a~~\n~~b~~")
+    }
+
+    @Test("a selection inside a list item's text works as before")
+    func partOfItem() {
+        #expect(toggle("**", "- [ ] ein Wort", NSRange(location: 10, length: 4)).0 == "- [ ] ein **Wort**")
     }
 
     @Test("a selection including the markers is unwrapped")
@@ -544,16 +577,6 @@ struct ContextMenuCommandTests {
         for line in ["--", "- a", "--- x", "**x**"] {
             #expect(!MarkdownSyntax.spans(in: line).map(\.kind).contains(.rule), "\(line)")
         }
-    }
-
-    @Test("a rule replaces an empty line, below text it gets a blank line first")
-    func insertRule() {
-        #expect(run(LineEditing.insertingRule(in: "", selection: NSRange(location: 0, length: 0)), on: "")
-            == ("---\n", NSRange(location: 4, length: 0)))
-        #expect(run(LineEditing.insertingRule(in: "Text", selection: NSRange(location: 2, length: 0)), on: "Text")
-            == ("Text\n\n---\n", NSRange(location: 10, length: 0)))
-        #expect(run(LineEditing.insertingRule(in: "a\nb", selection: NSRange(location: 0, length: 0)), on: "a\nb")
-            == ("a\n\n---\nb", NSRange(location: 7, length: 0)))
     }
 
     @Test("quotes on and off")
