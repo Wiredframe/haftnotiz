@@ -38,6 +38,7 @@ Line commands act on every line the selection touches. Everything is also in the
 | **⌥↑ / ⌥↓** | Move the line up / down |
 | **⌘B / ⌘I / ⇧⌘S / ⌘E** | Bold / italic / strikethrough / code; pressed again, it removes the formatting |
 | **⌘K** | Link (a selected URL goes into the parentheses) |
+| **⇧⌘T** | Insert today's date in the system's long format ("Wednesday, 18 November 2026") |
 | **⌘1 … ⌘6 / ⌘0** | Heading of that level / plain text |
 | **⇧⌘8 / ⇧⌘7 / ⇧⌘L** | Bullet list / numbered list / checkboxes, and back |
 | **⇧⌘D** | Duplicate the line |

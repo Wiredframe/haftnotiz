@@ -120,6 +120,10 @@ struct NoteEditor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
+            // When an edit moves the lines below, NSTextView shifts their old pixels instead of drawing
+            // them again, which a transparent text view gets wrong: lines vanished after Return.
+            // A note is small, so simply redraw what is visible.
+            textView.setNeedsDisplay(textView.visibleRect)
             onChange(textView.string)
         }
 

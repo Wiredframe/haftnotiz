@@ -6,7 +6,7 @@ import AppKit
 /// - Tab / ⇧Tab indent and outdent a list item.
 /// - ⌥↑ / ⌥↓ move the current line (or all selected lines) up or down.
 /// - ⌘B / ⌘I / ⇧⌘S / ⌘E wrap the selection in `**` / `*` / `~~` / backticks, or unwrap it;
-///   ⌘K makes a link.
+///   ⌘K makes a link, ⇧⌘T inserts today's date in the system's long format.
 /// - On every selected line: ⌘1–⌘6 heading, ⌘0 plain text (no heading, list or quote), ⇧⌘8 / ⇧⌘7 / ⇧⌘L bullet, numbered
 ///   or checkbox list and back, ⇧⌘D duplicate, ⇧⌘K delete.
 /// - The context menu offers all of this (with the shortcuts, for those who forget them), plus
@@ -206,6 +206,9 @@ final class MarkdownTextView: NSTextView {
         case ([.command, .shift], "k"):
             apply(LineEditing.deleting(in: string, selection: selectedRange()))
             return true
+        case ([.command, .shift], "t"):
+            insertDate()
+            return true
         case ([.command], "x"):
             cut(nil)
             return true
@@ -232,6 +235,13 @@ final class MarkdownTextView: NSTextView {
         default:
             return super.performKeyEquivalent(with: event)
         }
+    }
+
+    /// Today's date in the system's long format, e.g. "Mittwoch, 18. November 2026" (System Settings › Language & Region).
+    private func insertDate() {
+        let date = Date.now.formatted(date: .complete, time: .omitted)
+        let selection = selectedRange()
+        replace(selection, with: date, selecting: NSRange(location: selection.location + (date as NSString).length, length: 0))
     }
 
     private func toggleWrap(_ marker: String) {
@@ -355,6 +365,7 @@ final class MarkdownTextView: NSTextView {
         ])
         return [
             item("Link hinzufügen", "k", cmd) { $0.apply(InlineFormatting.link(in: $0.string, selection: $0.selectedRange())) },
+            item("Datum einfügen", "t", shiftCmd) { $0.insertDate() },
             .separator(),
             format, paragraph, lines,
         ]
