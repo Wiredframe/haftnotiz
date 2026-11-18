@@ -30,10 +30,13 @@ struct MarkdownStyler {
         [.font: Self.bodyFont, .foregroundColor: ink, .paragraphStyle: Self.paragraphStyle]
     }
 
-    /// Restyles the whole paragraphs touching `range`.
+    /// Restyles the whole paragraphs touching `range`, including the one right after it: a Return
+    /// inside a heading ends the edit at the start of the new line, whose text still has the
+    /// heading's font.
     func apply(to storage: NSTextStorage, in range: NSRange) {
         let ns = storage.string as NSString
-        let paragraphs = ns.paragraphRange(for: range)
+        let upper = min(range.upperBound, ns.length)
+        let paragraphs = NSUnionRange(ns.paragraphRange(for: range), ns.paragraphRange(for: NSRange(location: upper, length: 0)))
         storage.setAttributes(baseAttributes, range: paragraphs)
         ns.enumerateSubstrings(in: paragraphs, options: [.byLines, .substringNotRequired]) { _, lineRange, enclosing, _ in
             let line = ns.substring(with: lineRange)

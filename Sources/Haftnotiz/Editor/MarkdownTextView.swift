@@ -4,6 +4,7 @@ import AppKit
 ///
 /// - Return continues a list (`- `, `- [ ] `, `1. `); Return on an empty item ends it.
 /// - Tab / ⇧Tab indent and outdent a list item.
+/// - ⌘⌫ keeps deleting into the lines above.
 /// - ⌥↑ / ⌥↓ move the current line (or all selected lines) up or down.
 /// - ⌘B / ⌘I / ⇧⌘S / ⌘E wrap the selection in `**` / `*` / `~~` / backticks, or unwrap it;
 ///   ⌘K makes a link, ⇧⌘T inserts today's date in the system's long format.
@@ -106,6 +107,14 @@ final class MarkdownTextView: NSTextView {
             replace(NSRange(location: lineStart, length: prefixLength), with: "",
                     selecting: NSRange(location: lineStart, length: 0))
         }
+    }
+
+    /// ⌘⌫ deletes to the start of the line; already there, it joins the line with the one above, so
+    /// pressing it again keeps deleting upwards instead of getting stuck.
+    override func deleteToBeginningOfLine(_ sender: Any?) {
+        let before = string
+        super.deleteToBeginningOfLine(sender)
+        if string == before, selectedRange().length == 0, selectedRange().location > 0 { deleteBackward(sender) }
     }
 
     override func insertTab(_ sender: Any?) {

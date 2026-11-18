@@ -36,6 +36,7 @@ Line commands act on every line the selection touches. Everything is also in the
 | **Return** in a list | Next item (an empty item ends the list) |
 | **Tab / ⇧Tab** in a list | Indent / outdent the item |
 | **⌥↑ / ⌥↓** | Move the line up / down |
+| **⌘⌫** | Delete to the start of the line; pressed again, it goes on into the lines above |
 | **⌘B / ⌘I / ⇧⌘S / ⌘E** | Bold / italic / strikethrough / code; pressed again, it removes the formatting |
 | **⌘K** | Link (a selected URL goes into the parentheses) |
 | **⇧⌘T** | Insert today's date in the system's long format ("Wednesday, 18 November 2026") |

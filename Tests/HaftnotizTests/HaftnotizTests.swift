@@ -321,6 +321,17 @@ struct EditorKeyTests {
         #expect(view.string == "- [x] Milch\n")
     }
 
+    @Test("Command-Backspace keeps deleting into the lines above")
+    func deleteToLineStartAcrossLines() {
+        let view = makeView("abc\ndef")
+        view.deleteToBeginningOfLine(nil)
+        #expect(view.string == "abc\n")
+        view.deleteToBeginningOfLine(nil)
+        #expect(view.string == "abc")
+        view.deleteToBeginningOfLine(nil)
+        #expect(view.string == "")
+    }
+
     @Test("a lone dash is not an empty item: Return keeps it")
     func loneDash() {
         let view = makeView("-")
@@ -595,5 +606,44 @@ struct ContextMenuCommandTests {
             == ("x y z", NSRange(location: 2, length: 1)))
         #expect(run(InlineFormatting.clearing(in: "snake_case_name", selection: NSRange(location: 0, length: 0)),
                     on: "snake_case_name").0 == "snake_case_name")
+    }
+}
+
+@MainActor @Suite("Styling while typing")
+struct StylingWhileTypingTests {
+    /// A text view wired up like the note's editor.
+    private func makeEditor(_ text: String) -> (MarkdownTextView, NoteEditor.Coordinator) {
+        let coordinator = NoteEditor(text: "", theme: NoteTheme(color: .yellow), onChange: { _ in }).makeCoordinator()
+        let view = MarkdownTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
+        view.isRichText = false
+        view.delegate = coordinator
+        view.textStorage?.delegate = coordinator
+        coordinator.textView = view
+        coordinator.apply(theme: NoteTheme(color: .yellow))
+        view.string = text
+        return (view, coordinator)
+    }
+
+    private func fontSize(_ view: MarkdownTextView, at index: Int) -> CGFloat? {
+        (view.textStorage?.attribute(.font, at: index, effectiveRange: nil) as? NSFont)?.pointSize
+    }
+
+    @Test("Return inside a heading leaves the moved text in body style")
+    func returnInsideHeading() {
+        let (view, _) = makeEditor("# Überschrift")
+        view.setSelectedRange(NSRange(location: 5, length: 0))
+        view.insertNewline(nil)
+        #expect(view.string == "# Übe\nrschrift")
+        #expect(fontSize(view, at: 6) == MarkdownStyler.fontSize)
+    }
+
+    @Test("a new line after a heading types in body style")
+    func typingAfterHeading() {
+        let (view, _) = makeEditor("# Titel")
+        view.setSelectedRange(NSRange(location: 7, length: 0))
+        view.insertNewline(nil)
+        #expect((view.typingAttributes[.font] as? NSFont)?.pointSize == MarkdownStyler.fontSize)
+        view.insertText("x", replacementRange: view.selectedRange())
+        #expect(fontSize(view, at: 8) == MarkdownStyler.fontSize)
     }
 }
